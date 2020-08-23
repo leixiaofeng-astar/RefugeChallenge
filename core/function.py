@@ -128,11 +128,16 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     idx = 0
     with torch.no_grad():
         end = time.time()
+        # xiaofeng comment -- (input, meta) --> 'image': image_file / 'fovea': np.array([fx, fy])
         for i, (input, meta) in enumerate(val_loader):
             # compute output
             heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta = \
                 model(input, meta, input_roi=None)
-
+            # (array([[992., 812.]], dtype=float32),
+            # array([[992., 811.]], dtype=float32),
+            # array([[991.55975, 810.6652 ]], dtype=float32),
+            # array([[128., 127.]], dtype=float32),
+            # array([[127.55977, 126.66521]], dtype=float32))
             fovea_lr_init_pred, fovea_hr_init_pred, fovea_final_pred, fovea_roi_init_pred, fovea_roi_final_pred = \
                 get_final_preds(config,
                                 heatmap_ds_pred.cpu().numpy(),
@@ -197,6 +202,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                     os.path.join(output_dir, 'val'), i
                 )
 
+                # xiaofeng comment it to save time
                 save_debug_images(config,
                                   input, meta['input_roi'],
                                   None, None, meta,

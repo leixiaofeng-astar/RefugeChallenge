@@ -38,10 +38,16 @@ def save_batch_image_with_fovea(batch_image, batch_fovea, file_name, nrow=8, pad
         for x in range(xmaps):
             if k >= nmaps:
                 break
-            fovea = batch_fovea[k]
-            fovea_x = int(x * width + padding + fovea[0] + 0.5)
-            fovea_y = int(y * height + padding + fovea[1] + 0.5)
-            cv2.circle(ndarr, (int(fovea_x), int(fovea_y)), 2, [255, 0, 0], 2)
+
+            # xiaofeng debug
+            try:
+                fovea = batch_fovea[k]
+                fovea_x = int(x * width + padding + fovea[0] + 0.5)
+                fovea_y = int(y * height + padding + fovea[1] + 0.5)
+
+                cv2.circle(ndarr, (int(fovea_x), int(fovea_y)), 2, [255, 0, 0], 2)
+            except:
+                print("Exception: running error fovea_x: %d, fovea_y: %d" %(int(fovea_x), int(fovea_y)))
             k = k + 1
     cv2.imwrite(file_name, ndarr)
 

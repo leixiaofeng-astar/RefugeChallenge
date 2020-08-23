@@ -118,6 +118,28 @@ class Dataset(FoveaDataset):
                 'fovea': np.array([fx, fy], np.float32)
             })
 
+        # TODO: refuge2 validation db -- xiaofeng comment
+        # refuge2 validation images and labels
+        val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
+        workbook = load_workbook(val2_anno_filename)
+        booksheet = workbook.active
+        rows = booksheet.rows
+        columns = booksheet.columns
+        val2_db = []
+        for i, row in enumerate(rows, 1):
+            if i == 1: continue  # skip the first row
+            # substract 1 pixel as we assume indexing from zero
+            fx = float(booksheet.cell(row=i, column=4).value) - 1
+            fy = float(booksheet.cell(row=i, column=5).value) - 1
+            fname = booksheet.cell(row=i, column=2).value
+            image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
+            if not self.is_image_file(image_file): continue
+
+            val2_db.append({
+                'image': image_file,
+                'fovea': np.array([fx, fy], np.float32)
+            })
+
         if image_set == 'train':
             return train_db
         elif image_set == 'test':
@@ -126,8 +148,10 @@ class Dataset(FoveaDataset):
             return val_db
         elif image_set == 'train+val':
             return train_db + val_db
+        elif image_set == 'val2':
+            return val2_db
         else:
-            assert 'Unknown image set: %s' %(imageset)
+            assert('Unknown image set: %s' %(image_set))
 
     def evaluate(self, preds, output_dir):
         num_images = len(self.db)

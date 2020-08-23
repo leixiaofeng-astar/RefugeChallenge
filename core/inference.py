@@ -32,6 +32,7 @@ def get_max_preds(batch_heatmaps):
 
     preds = np.tile(idx, (1, 1, 2)).astype(np.float32)
 
+    # TODO: xiaofeng comment: get x, y of the hotest point
     preds[:, :, 0] = (preds[:, :, 0]) % width
     preds[:, :, 1] = np.floor((preds[:, :, 1]) / width)
 

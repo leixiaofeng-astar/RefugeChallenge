@@ -5,6 +5,7 @@ from __future__ import print_function
 import copy
 import logging
 import random
+import imgaug.augmenters as iaa
 
 import cv2
 import numpy as np
@@ -19,7 +20,32 @@ from utils.transforms import crop_and_resize
 
 
 logger = logging.getLogger(__name__)
-
+common_aug_func = iaa.Sequential(
+[
+    # iaa.Sometimes(0.5, iaa.CropAndPad(
+    #     percent=(-0.5, 0.5),
+    #     pad_mode='constant',  # ia.ALL,
+    #     pad_cval=0
+    # )),
+    # apply the following augmenters to most images
+    iaa.Fliplr(0.2),  # Horizontally flip 20% of all images
+    iaa.Flipud(0.2),  # Vertically flip 20% of all images
+    iaa.Sometimes(0.3, iaa.Rot90((1, 3))),  # Randomly rotate 90, 180, 270 degrees 30% of the time
+    # Affine transformation reduces dice by ~1%. So disable it by setting affine_prob=0.
+    iaa.Sometimes(0.3, iaa.Affine(
+        rotate=(-45, 45),  # rotate by -45 to +45 degrees
+        shear=(-16, 16),  # shear by -16 to +16 degrees
+        order=1,
+        cval=(0, 255),
+        mode='reflect'
+    )),
+    iaa.Sometimes(0.3, iaa.GammaContrast((0.7, 1.7))),
+    # When tgt_width==tgt_height, PadToFixedSize and CropToFixedSize are unnecessary.
+    # Otherwise, we have to take care if the longer edge is rotated to the shorter edge.
+    iaa.PadToFixedSize(width=1536, height=1536),
+    iaa.CropToFixedSize(width=1536, height=1536),
+    iaa.Grayscale(alpha=0.5)
+])
 
 class FoveaDataset(Dataset):
     def __init__(self, cfg, root, image_set, is_train, transform=None):
@@ -71,6 +97,50 @@ class FoveaDataset(Dataset):
             fovea = np.array(db_rec['fovea'])
         else:
             fovea = np.array([-1, -1])
+
+        # xiaofeng add for test
+		'''
+        # gray_trans = iaa.Grayscale(alpha=0.5)
+        # im = data_numpy[:, :, ::-1]  # Change channels to RGB
+        # im = gray_trans.augment_image(im)
+        # data_numpy = im[:, :, ::-1]  # Change channels to RGB
+		'''
+
+        # alpha = 0.5
+        # img_temp = data_numpy.copy()
+        # # img_gray = (img_temp[:, :, 0] + img_temp[:, :, 1] + img_temp[:, :, 2]) / 3
+        # img_gray = img_temp[:, :, 0] * 0.11 + img_temp[:, :, 1] * 0.59 + img_temp[:, :, 2] * 0.3
+        # img_gray2 = img_gray * alpha
+        # img_gray2 = img_gray2.reshape(img_gray2.shape[0], img_gray2.shape[1], -1)
+        # img_gray3 = np.tile(img_gray2, [1, 1, 3])
+        #
+        # data_numpy = data_numpy.astype(np.float)
+        # data_numpy = data_numpy * alpha + img_gray3
+        #
+        # cmin = data_numpy.min()
+        # cmax = data_numpy.max()
+        # Thr0 = 250
+        # if (cmax > Thr0):
+        #     cmax = Thr0
+        #     d2 = data_numpy[data_numpy <= Thr0]
+        #     cmax2 = d2.max()
+        #     data = (data_numpy.clip(0, cmax2)).astype(np.uint16)
+        # else:
+        #     data = (data_numpy.clip(0, cmax)).astype(np.uint16)
+        #     cmax2 = cmax
+        #
+        # scale = float(255.0) / cmax2
+        # if scale == 0:
+        #     scale = 1
+        # bytedata = (data - 0) * scale
+        # data_numpy = (bytedata.clip(0, 255)).astype(np.uint8)
+        # xiaofeng -- end of the trick
+
+        # data_numpy = cv2.cvtColor(data_numpy, cv2.COLOR_BGR2GRAY)
+        # data_numpy = data_numpy.reshape(data_numpy.shape[0], data_numpy.shape[1], -1)
+        # if data_numpy.shape[2] == 1:
+        #     # repeat 3 times to make fake RGB images
+        #     data_numpy = np.tile(data_numpy, [1, 1, 3])
 
         dh, dw = data_numpy.shape[:2]
         if dh != self.image_size[1] or dw != self.image_size[0]:
@@ -143,8 +213,11 @@ class FoveaDataset(Dataset):
 
         if self.is_train:
             patch_size = self.patch_size.astype(np.int32)
-            pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
-            ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
+            # xiaofeng modify it
+            # pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
+            # ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
+            pw = np.random.randint(0, int(image_size[1] - patch_size[0] + 1))
+            ph = np.random.randint(0, int(image_size[0] - patch_size[1] + 1))
             input = input[ph:ph+patch_size[1], pw:pw+patch_size[0], :]
             fovea[0] -= pw
             fovea[1] -= ph

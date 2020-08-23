@@ -48,11 +48,14 @@ _C.LOSS.REGRESS_WEIGHT = 1.0
 
 # DATASET related params
 _C.DATASET = CN()
-_C.DATASET.ROOT = '/media/sensetime/c5a81ad1-7b6f-44a9-88fb-ccb6cc0afc3d2/data/refuge/data/'
+_C.DATASET.ROOT = '/home/user/eye/xf_refuge/data/'
 _C.DATASET.DATASET = 'refuge'
 _C.DATASET.TRAIN_SET = 'train+val'
+_C.DATASET.TRAIN_SET_1 = 'train'
+_C.DATASET.TRAIN_SET_2 = 'val'
 _C.DATASET.TRAIN_FOLD = 0 # 0 denotes using all the dataset
 _C.DATASET.TEST_SET = 'test'
+_C.DATASET.VAL_SET = 'val2'
 
 # training data augmentation
 _C.DATASET.FLIP = True
