@@ -14,7 +14,7 @@ import copy
 
 from core.inference import get_max_preds
 from utils.transforms import crop_and_resize
-
+from efficientnet.model import EfficientNet
 
 BN_MOMENTUM = 0.1
 logger = logging.getLogger(__name__)
@@ -976,6 +976,17 @@ class FoveaNet(nn.Module):
             else:
                 # TODO
                 vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
+                # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
+                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+
+                # curr_feat:            XF: 3: [4, 160, 28, 28]
+                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+                # curr_feat = batch_base_feats[3]
+                # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
+                #                                                               size=curr_feat.shape[2:],
+                #                                                               mode=self.fpn_interp_mode,
+                #                                                               align_corners=self.align_corners)
+                
                 # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
                 trans_scores_small = self.out_conv(vfeat_fused_fpn)
 

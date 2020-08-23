@@ -163,7 +163,6 @@ class Dataset(FoveaDataset):
             val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations.xlsx')
             workbook = load_workbook(val_anno_filename)
             booksheet = workbook.active
-        elif image_set == 'test':
             rows = booksheet.rows
             columns = booksheet.columns
             val_db = []
