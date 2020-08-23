@@ -15,6 +15,7 @@ from core.evaluate import calc_batch_l2_dist
 from core.inference import get_final_preds
 from utils.transforms import flip_torch
 from utils.vis import save_debug_images
+from utils.utils import save_checkpoint
 
 
 logger = logging.getLogger(__name__)
@@ -31,12 +32,15 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
 
     # switch to train mode
     model.train()
+    cuda = torch.device('cuda')
 
     end = time.time()
     for i, (input, input_roi, heatmap_ds, heatmap_roi, offset_in_roi, target_weight, meta) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
+        model = model.to(device=cuda)
+        input = input.to(device=cuda)
         # compute output
         heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta = \
             model(input, meta, input_roi=input_roi)
@@ -74,7 +78,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
                   'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
                   'Speed {speed:.1f} samples/s\t' \
                   'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
-                  'Loss {loss.val:.7f} ({loss.avg:.7f})\t' \
+                  'Loss {loss.val:.7f} ({loss.avg:.7f}) -- ' \
                   'Losses {heatmap_ds_loss.val:.7f} ({heatmap_ds_loss.avg:.7f}), ' \
                   '{heatmap_roi_loss.val:.7f} ({heatmap_roi_loss.avg:.7f}), ' \
                   '{offset_loss.val:.7f} ({offset_loss.avg:.6f})' \
@@ -109,7 +113,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
 
 
 def validate(config, val_loader, val_dataset, model, criterion, output_dir,
-             tb_log_dir, writer_dict=None):
+             tb_log_dir, writer_dict=None, db_vals=[]):
     batch_time = AverageMeter()
     lr_init_dists = AverageMeter()
     hr_init_dists = AverageMeter()
@@ -133,7 +137,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             # compute output
             heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta = \
                 model(input, meta, input_roi=None)
-            # (array([[992., 812.]], dtype=float32),
+
+            # xiaofeng add for one sample
+            # array([[992., 812.]], dtype=float32),
             # array([[992., 811.]], dtype=float32),
             # array([[991.55975, 810.6652 ]], dtype=float32),
             # array([[128., 127.]], dtype=float32),
@@ -202,7 +208,6 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                     os.path.join(output_dir, 'val'), i
                 )
 
-                # xiaofeng comment it to save time
                 save_debug_images(config,
                                   input, meta['input_roi'],
                                   None, None, meta,
@@ -231,9 +236,30 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             writer_dict['valid_global_steps'] = global_steps + 1
 
 
-    lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir=None)
-    hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir=None)
-    final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
+    if db_vals:
+        lr_init_avg_l2_dist = hr_init_avg_l2_dist = final_avg_l2_dist = 0
+        sum_db = 0
+        each_db_images = 400
+        for dataset_iter in db_vals:
+            sum_db += 1
+            lr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_lr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir='./')
+            lr_init_avg_l2_dist += lr_tmp_avg_l2_dist
+            hr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_hr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=None)
+            hr_init_avg_l2_dist += hr_tmp_avg_l2_dist
+            final_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_final_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=output_dir)
+            final_avg_l2_dist += final_tmp_avg_l2_dist
+            logger.info('Dataset %d Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' % (
+                sum_db, lr_tmp_avg_l2_dist, hr_tmp_avg_l2_dist, final_tmp_avg_l2_dist))
+        if sum_db == 0:
+            sum_db = 1
+        lr_init_avg_l2_dist /= sum_db
+        hr_init_avg_l2_dist /= sum_db
+        final_avg_l2_dist /= sum_db
+    else:
+        lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir='./')
+        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir=None)
+        final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
+
     logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
         lr_init_avg_l2_dist, hr_init_avg_l2_dist, final_avg_l2_dist))
 

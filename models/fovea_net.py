@@ -9,14 +9,25 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import cv2
+import copy
 
 from core.inference import get_max_preds
 from utils.transforms import crop_and_resize
 
+
 BN_MOMENTUM = 0.1
 logger = logging.getLogger(__name__)
 
+bb2feat_dims = { 'resnet34':  [64, 64,  128, 256,  512],
+                 'resnet50':  [64, 256, 512, 1024, 2048],
+                 'resnet101': [64, 256, 512, 1024, 2048],
+                 'eff-b0':    [16, 24,  40,  112,  1280],   # input: 224
+                 'eff-b1':    [16, 24,  40,  112,  1280],   # input: 240
+                 'eff-b2':    [16, 24,  48,  120,  1408],   # input: 260
+                 'eff-b3':    [24, 32,  48,  136,  1536],   # input: 300
+                 'eff-b4':    [24, 32,  56,  160,  1792],   # input: 380
+               }
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -500,6 +511,15 @@ def get_hrnet(cfg, is_train, **kwargs):
 
     return model
 
+def get_all_indices(shape):
+    indices = torch.arange(shape.numel()).view(shape)
+    # indices = indices.cuda()
+
+    out = []
+    for dim in reversed(shape):
+        out.append(indices % dim)
+        indices = indices // dim
+    return torch.stack(tuple(reversed(out)), len(shape))
 
 class FoveaNet(nn.Module):
     def __init__(self, cfg, **kwargs):
@@ -513,13 +533,129 @@ class FoveaNet(nn.Module):
         )
 
         # stem net
+        # self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1,
+        #                        bias=False)
+        # self.bn1 = nn.BatchNorm2d(32, momentum=BN_MOMENTUM)
+        # self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1,
+        #                        bias=False)
+        # self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        # self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1,
+        #                        bias=False)
+        # self.bn3 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        # self.relu = nn.ReLU(inplace=True)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
-                               bias=False)
+                              bias=False)
+        self.conv1_1 = nn.Conv2d(3, 64, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1,
                                bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        # xf add it
+        self.conv3 = nn.Conv2d(64, 16, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(16)
+
         self.relu = nn.ReLU(inplace=True)
+        
+        # xiaofeng add for efficientnet
+        if self.cfg.TRAIN.EFF_NET:
+            from efficientnet.model import EfficientNet
+            self.backbone_type = 'eff-b4'  # resnet34, resnet50, efficientnet-b0~b4
+            self.bb_feat_dims = bb2feat_dims[self.backbone_type]
+            # Set in_fpn_scheme and out_fpn_scheme to 'NA' and 'NA', respectively.
+            # NA: normalize first, then add. AN: add first, then normalize.
+            # self.set_fpn_layers('34', '1234', 'AN', 'AN', 'default')
+            self.set_fpn_layers('34', '234', 'AN', 'AN', 'default')
+            self.fpn_interp_mode = 'bilinear'  # nearest, bilinear. Using 'nearest' causes significant degradation.
+            self.eff_feat_upsize = True  # Configure efficient net to generate x2 feature maps.
+            self.in_fpn_use_bn = False  # If in FPN uses BN, it performs slightly worse than using GN.
+            self.out_fpn_use_bn = False  # If out FPN uses BN, it performs worse than using GN.
+            self.resnet_bn_to_gn = False  # Converting resnet BN to GN reduces performance.
+            self.align_corners = None if self.fpn_interp_mode == 'nearest' else False
+            self.G = 8
+            self.cut_zeros = False
+            self.output_scaleup = 1.0
+            self.num_classes = 1   # for localization
+            # Randomness settings
+            self.hidden_dropout_prob = 0.2
+            self.attention_probs_dropout_prob = 0.2
+            self.out_fpn_do_dropout = False
+            backbone_type = self.backbone_type.replace("eff", "efficientnet")
+            stem_stride = 1 if self.eff_feat_upsize else 2
+            self.backbone = EfficientNet.from_pretrained(backbone_type, advprop=True, stem_stride=stem_stride)
+            print("%s created (stem stride %d)" % (backbone_type, stem_stride))
+            self.backbone = EfficientNet.from_pretrained(backbone_type, advprop=True, stem_stride=stem_stride)
+            if 2 in self.in_fpn_layers:
+                self.mask_pool = nn.AvgPool2d((4, 4))
+            elif 3 in self.in_fpn_layers:
+                self.mask_pool = nn.AvgPool2d((8, 8))
+            else:
+                self.mask_pool = nn.AvgPool2d((16, 16))
+
+            self.in_fpn23_conv = nn.Conv2d(self.bb_feat_dims[2], self.bb_feat_dims[3], 1)
+            self.in_fpn34_conv = nn.Conv2d(self.bb_feat_dims[3], self.bb_feat_dims[4], 1)
+
+            # in_bn4b/in_gn4b normalizes in_fpn43_conv(layer 4 features),
+            # so the feature dim = dim of layer 3.
+            # in_bn3b/in_gn3b normalizes in_fpn32_conv(layer 3 features),
+            # so the feature dim = dim of layer 2.
+            if self.in_fpn_use_bn:
+                self.in_bn3b = nn.BatchNorm2d(self.bb_feat_dims[3])
+                self.in_bn4b = nn.BatchNorm2d(self.bb_feat_dims[4])
+                self.in_fpn_norms = [None, None, None, self.in_bn3b, self.in_bn4b]
+            else:
+                self.in_gn3b = nn.GroupNorm(self.G, self.bb_feat_dims[3])
+                self.in_gn4b = nn.GroupNorm(self.G, self.bb_feat_dims[4])
+                self.in_fpn_norms = [None, None, None, self.in_gn3b, self.in_gn4b]
+
+            self.in_fpn_convs = [None, None, self.in_fpn23_conv, self.in_fpn34_conv]
+            if self.out_fpn_layers != self.in_fpn_layers:
+                self.do_out_fpn = True
+                self.out_fpn12_conv = nn.Conv2d(self.bb_feat_dims[1],
+                                                self.bb_feat_dims[2], 1)
+                self.out_fpn23_conv = nn.Conv2d(self.bb_feat_dims[2],
+                                                self.bb_feat_dims[3], 1)
+                self.out_fpn34_conv = nn.Conv2d(self.bb_feat_dims[3],
+                                                self.bb_feat_dims[4], 1)
+                # last_out_fpn_layer = 3 here, 160 --> 1792
+                last_out_fpn_layer = self.out_fpn_layers[-len(self.in_fpn_layers)]
+                self.out_bridgeconv = nn.Conv2d(self.bb_feat_dims[last_out_fpn_layer],
+                                                self.feat_dim, 1)
+                print("out_bridgeconv (last_out_fpn_layer %d, conv: %d --> %d)" \
+                      % (last_out_fpn_layer, self.bb_feat_dims[last_out_fpn_layer], self.feat_dim))
+
+                # out_bn3b/out_gn3b normalizes out_fpn23_conv(layer 3 features),
+                # so the feature dim = dim of layer 2.
+                # out_bn2b/out_gn2b normalizes out_fpn12_conv(layer 2 features),
+                # so the feature dim = dim of layer 1.
+                if self.out_fpn_use_bn:
+                    self.out_bn2b = nn.BatchNorm2d(self.bb_feat_dims[2])
+                    self.out_bn3b = nn.BatchNorm2d(self.bb_feat_dims[3])
+                    self.out_bn4b = nn.BatchNorm2d(self.bb_feat_dims[4])
+                    self.out_fpn_norms = [None, None, self.out_bn2b, self.out_bn3b, self.out_bn4b]
+                else:
+                    self.out_gn2b = nn.GroupNorm(self.G, self.bb_feat_dims[2])
+                    self.out_gn3b = nn.GroupNorm(self.G, self.bb_feat_dims[3])
+                    self.out_gn4b = nn.GroupNorm(self.G, self.bb_feat_dims[4])
+                    self.out_fpn_norms = [None, None, self.out_gn2b, self.out_gn3b, self.out_gn4b]
+
+                self.out_fpn_convs = [None, self.out_fpn12_conv, self.out_fpn23_conv, self.out_fpn34_conv]
+                self.out_conv = nn.Conv2d(self.out_feat_dim, self.num_classes, 1)
+                self.out_fpn_dropout = nn.Dropout(self.hidden_dropout_prob)
+
+                # xiaofeng add
+                self.roi_gn = nn.GroupNorm(self.G, self.bb_feat_dims[4])
+            # out_fpn_layers = in_fpn_layers, no need to do fpn at the output end.
+            # Output class scores directly.
+            else:
+                self.do_out_fpn = False
+                if '2' in self.in_fpn_layers:
+                    # Output resolution is 1/4 of input already. No need to do upsampling here.
+                    self.out_conv = nn.Conv2d(self.feat_dim, self.num_classes, 1)
+                else:
+                    # Output resolution is 1/8 of input. Do upsampling to make resolution x 2
+                    self.out_conv = nn.ConvTranspose2d(self.feat_dim, self.num_classes, 2, 2)
+
+            # end: xiaofeng add for efficientnet
 
         # fusion layer
         self.convf = nn.Conv2d(16 + 16, 32, kernel_size=3, stride=1, padding=1, bias=False)
@@ -544,9 +680,18 @@ class FoveaNet(nn.Module):
             nn.ReLU(),
             nn.Linear(16, 2)
         )
+        self.eff_regress = nn.Sequential(
+            nn.Linear(1792, 160),
+            nn.BatchNorm1d(160, momentum=BN_MOMENTUM),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(160, 16),
+            nn.BatchNorm1d(16, momentum=BN_MOMENTUM),
+            nn.ReLU(),
+            nn.Linear(16, 2)
+        )
 
     def init_weights(self, pretrained):
-
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.normal_(m.weight, std=0.001)
@@ -579,17 +724,162 @@ class FoveaNet(nn.Module):
             logger.error('=> please download pre-trained models first!')
             raise ValueError('{} is not exist!'.format(pretrained))
 
+    # batch:        [40, 3, 112, 112]
+    # nonzero_mask: [40, 28, 28]
+    def get_mask(self, batch):
+        with torch.no_grad():
+            avg_pooled_batch = self.mask_pool(batch.abs())
+            nonzero_mask = avg_pooled_batch.sum(dim=1) > 0
+        return nonzero_mask
+
+    def set_fpn_layers(self, in_fpn_layers, out_fpn_layers,
+                       in_fpn_scheme, out_fpn_scheme, config_name):
+        self.in_fpn_layers = [int(layer) for layer in in_fpn_layers]
+        self.out_fpn_layers = [int(layer) for layer in out_fpn_layers]
+        # out_fpn_layers cannot be a subset of in_fpn_layers, like: in=234, out=34.
+        # in_fpn_layers  could be a subset of out_fpn_layers, like: in=34,  out=234.
+        if self.out_fpn_layers[-1] > self.in_fpn_layers[-1]:
+            print("in_fpn_layers=%s is not compatible with out_fpn_layers=%s" % (self.in_fpn_layers, self.out_fpn_layers))
+            exit(0)
+
+        self.in_feat_dim = self.bb_feat_dims[self.in_fpn_layers[-1]]
+        self.feat_dim = self.in_feat_dim
+        self.out_feat_dim = self.in_feat_dim
+        self.in_fpn_scheme = in_fpn_scheme
+        self.out_fpn_scheme = out_fpn_scheme
+        print("'%s' in-feat: %d, feat: %d, out-feat: %d, in-scheme: %s, out-scheme: %s" % \
+              (config_name, self.in_feat_dim, self.feat_dim, self.out_feat_dim,
+               self.in_fpn_scheme, self.out_fpn_scheme))
+
+    def in_fpn_forward(self, batch_base_feats, nonzero_mask, B):
+        # batch_base_feat3: [40, 256, 14, 14], batch_base_feat4: [40, 512, 7, 7]
+        # batch_base_feat2: [40, 128, 28, 28]
+        # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
+        feat0_pool, feat1, batch_base_feat2, batch_base_feat3, batch_base_feat4 = batch_base_feats
+        curr_feat = batch_base_feats[self.in_fpn_layers[0]]
+
+        # curr_feat: [40, 128, 28, 28] -> [40, 256, 28, 28] -> [40, 512, 28, 28]
+        #                   2                   3                    4
+        for layer in self.in_fpn_layers[:-1]:
+            upconv_feat = self.in_fpn_convs[layer](curr_feat)
+            higher_feat = batch_base_feats[layer + 1]
+            if self.in_fpn_scheme == 'AN':
+                curr_feat = upconv_feat + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                        mode=self.fpn_interp_mode,
+                                                        align_corners=self.align_corners)
+                curr_feat = self.in_fpn_norms[layer + 1](curr_feat)
+            else:
+                upconv_feat_normed = self.in_fpn_norms[layer + 1](upconv_feat)
+                curr_feat = upconv_feat_normed + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                               mode=self.fpn_interp_mode,
+                                                               align_corners=self.align_corners)
+
+        batch_base_feat_fpn = curr_feat
+
+        H2, W2 = batch_base_feat_fpn.shape[2:]
+        # batch_base_feat_fpn:        [B, 512, 28, 28]
+        # batch_base_feat_fpn_hwc:    [B, 28,  28, 512]
+        batch_base_feat_fpn_hwc = batch_base_feat_fpn.permute([0, 2, 3, 1])
+        # vfeat_fpn:            [B, 784, 512]
+        vfeat_fpn = batch_base_feat_fpn_hwc.reshape((B, -1, self.feat_dim))
+        # nonzero_mask:         [B, 28, 28]
+        # vmask_fpn:            [B, 784]
+        vmask_fpn = nonzero_mask.reshape((B, -1))
+
+        return vfeat_fpn, vmask_fpn, H2, W2
+
+    def out_fpn_forward(self, batch_base_feats, vfeat_fused, B0):
+        # batch_base_feat3: [40, 256, 14, 14], batch_base_feat4: [40, 512, 7, 7]
+        # batch_base_feat2: [40, 128, 28, 28]
+        # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
+        feat0_pool, feat1, batch_base_feat2, batch_base_feat3, batch_base_feat4 = batch_base_feats
+        curr_feat = batch_base_feats[self.out_fpn_layers[0]]
+        # Only consider the extra layers in output fpn compared with input fpn,
+        # plus the last layer in input fpn.
+        # If in: [3,4], out: [1,2,3,4], then out_fpn_layers=[1,2,3].
+        out_fpn_layers = self.out_fpn_layers[:-len(self.in_fpn_layers)]
+
+        # curr_feat: [2, 64, 56, 56] -> [2, 128, 56, 56] -> [2, 256, 56, 56]
+        #                 1                  2                   3
+        for layer in out_fpn_layers:
+            upconv_feat = self.out_fpn_convs[layer](curr_feat)
+            higher_feat = batch_base_feats[layer + 1]
+            if self.out_fpn_scheme == 'AN':
+                curr_feat = upconv_feat + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                        mode=self.fpn_interp_mode,
+                                                        align_corners=self.align_corners)
+                curr_feat = self.out_fpn_norms[layer + 1](curr_feat)
+            else:
+                upconv_feat_normed = self.out_fpn_norms[layer + 1](upconv_feat)
+                curr_feat = upconv_feat_normed + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                               mode=self.fpn_interp_mode,
+                                                               align_corners=self.align_corners)
+
+        # curr_feat:   [2, 512, 56, 56]
+        # vfeat_fused: [2, 512, 28, 28]
+        out_feat_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(vfeat_fused, size=curr_feat.shape[2:],
+                                                                      mode=self.fpn_interp_mode,
+                                                                      align_corners=self.align_corners)
+
+        if self.out_fpn_do_dropout:
+            out_feat_drop = self.out_fpn_dropout(out_feat_fpn)
+            return out_feat_drop
+        else:
+            return out_feat_fpn
+
+    def xf_out_fpn_heatmap(self, batch_base_feats):
+        # batch_base_feat3: [B, 160, 14, 14], batch_base_feat4: [B, 1792, 7, 7]
+        # batch_base_feat2: [B, 56, 28, 28], feat1: [B, 32, 56, 56]
+        # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
+        feat0_pool, feat1, batch_base_feat2, batch_base_feat3, batch_base_feat4 = batch_base_feats
+        curr_feat = batch_base_feats[self.out_fpn_layers[0]]
+        # Only consider the extra layers in output fpn compared with input fpn,
+        # plus the last layer in input fpn.
+        # If in: [3,4], out: [1,2,3,4], then out_fpn_layers=[1,2].
+        out_fpn_layers = self.out_fpn_layers[:-len(self.in_fpn_layers)]
+        # xf: feat0_pool:[4, 24, 224, 224] [4, 32, 112, 112] [4, 56, 56, 56] [4, 160, 28, 28] [4, 1792, 14, 14])
+        # curr_feat:                       [2, 64, 56, 56]/[4, 32, 112, 112] -> [2, 128, 56, 56] -> [2, 256, 56, 56]
+        #                                                      1                  2                   3
+        for layer in out_fpn_layers:
+            upconv_feat = self.out_fpn_convs[layer](curr_feat)   # [4, 56, 112, 112] / [4, 160, 112, 112]
+            higher_feat = batch_base_feats[layer + 1]            # [4, 56, 56, 56] / [4, 160, 28, 28]
+            if self.out_fpn_scheme == 'AN':
+                curr_feat = upconv_feat + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                        mode=self.fpn_interp_mode,
+                                                        align_corners=self.align_corners)
+                curr_feat = self.out_fpn_norms[layer + 1](curr_feat)
+            else:
+                upconv_feat_normed = self.out_fpn_norms[layer + 1](upconv_feat)
+                curr_feat = upconv_feat_normed + F.interpolate(higher_feat, size=upconv_feat.shape[2:],
+                                                               mode=self.fpn_interp_mode,
+                                                               align_corners=self.align_corners)
+
+        # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
+        # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+        out_feat_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1], size=curr_feat.shape[2:],
+                                                                      mode=self.fpn_interp_mode,
+                                                                      align_corners=self.align_corners)
+
+        if self.out_fpn_do_dropout:
+            out_feat_drop = self.out_fpn_dropout(out_feat_fpn)
+            return out_feat_drop
+        else:
+            return out_feat_fpn
+
+
     def forward(self, input, meta, input_roi=None):
         infer_roi = input_roi is None
         ds_factor = self.cfg.MODEL.DS_FACTOR
 
         # Low-resolution branch
-        _, _, ih, iw = input.size()
+        _, _, ih, iw = input.size()   # train input is 256x256
         nh = int(ih * 1.0 / ds_factor)
         nw = int(iw * 1.0 / ds_factor)
         input_ds = F.upsample(input, size=(nh, nw), mode='bilinear', align_corners=True)
-        input_ds_feats = self.hrnet(input_ds)
+        input_ds_feats = self.hrnet(input_ds)  # (batch, 256, 64, 64)
+        # 256 channel --> 16 channel, HRNET resolution: (batch, 256, 64, 64) --> (20, 16, 256, 256)
         input_ds_feats = self.subpixel_up_by4(input_ds_feats)
+        # 16 channel --> 1 channel / (batch, 16, 256, 256) --> (batch, 1, 256, 256)
         heatmap_ds_pred = self.heatmap_ds(input_ds_feats)
 
         # High-resolution branch
@@ -604,19 +894,139 @@ class FoveaNet(nn.Module):
             meta.update(
                 {'roi_center': roi_center.cpu(),
                  'input_roi': input_roi.cpu()
-                })
+                 })
         else:
             assert 'roi_center' in meta.keys()
             roi_center = meta['roi_center'].cuda(non_blocking=True)
 
-        roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))
-        roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))
-        roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
-        roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)
-        roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
+        if self.cfg.TRAIN.EFF_NET:
+            # TODO -- xiaofeng change for efficient Net
+            # resize to 3x224x224, changre REGION_RADIUS from 128 to 112
+            # batch = cv2.resize(input_roi, dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+            batch = input_roi
+            MOD = 0
+            B0 = batch.shape[0]
+            B, C, H, W = batch.shape
+            orig_SH_alg = False
 
-        roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
-        heatmap_roi_pred = self.heatmap_roi(roi_feats)
+            with torch.no_grad():
+                # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
+                nonzero_mask = self.get_mask(batch)
+
+            if self.backbone_type.startswith('resnet'):
+                batch_base_feats = self.backbone.ext_features(batch)
+            elif self.backbone_type.startswith('eff'):
+                feats_dict = self.backbone.extract_endpoints(batch)
+                #                       [40, 16, 128, 128],        [40, 24, 64, 64]
+                batch_base_feats = (feats_dict['reduction_1'], feats_dict['reduction_2'], \
+                                    #                       [40, 40, 32, 32],          [40, 112, 16, 16],       [40, 1280, 8, 8]
+                                    feats_dict['reduction_3'], feats_dict['reduction_4'], feats_dict['reduction_5'])
+
+
+            # vfeat_fpn: [B (B0*MOD), 3920, 256] / vfeat_fpn.shape = torch.Size([4, 784, 1792])
+            vfeat_fpn, vmask, H2, W2 = self.in_fpn_forward(batch_base_feats, nonzero_mask, B)
+
+            # if self.in_fpn_layers == '234', xy_shape = (28, 28)
+            # if self.in_fpn_layers == '34',  xy_shape = (14, 14)
+            xy_shape = torch.Size((H2, W2))
+            # xy_indices: [14, 14, 20, 3]
+            xy_indices = get_all_indices(xy_shape)
+            scale_H = H // H2
+            scale_W = W // W2
+
+            # Has to be exactly divided.
+            if (scale_H * H2 != H) or (scale_W * W2 != W):
+                import pdb
+                pdb.set_trace()
+
+            scale = torch.tensor([[scale_H, scale_W]], device='cuda')
+
+            if orig_SH_alg:
+
+                # xy_indices: [3920, 2]
+                # Rectify the scales on H, W.  xy_indices: [14, 14, 2]
+                # xy_indices = xy_indices.view([-1, 2]).float() * scale
+
+                # voxels_pos: [B0, 3920, 2], "2" is coordinates. -- [B, 14x14, 2]
+                # voxels_pos = xy_indices.unsqueeze(0).repeat((B0, 1, 1))
+
+                # vfeat = self.featemb(vfeat_fpn, voxels_pos)
+                # vfeat2 = vfeat * vmask.unsqueeze(2)
+                # XF: vfeat_fpn [B, 14x14, 1792]  vmask: [B, 14x14, 1]
+                vfeat2 = vfeat_fpn * vmask.unsqueeze(2)
+
+                # vfeat_fused: [2, 784, 256]
+                # vfeat_fused2 = self.voxel_fusion(vfeat2)
+                # vfeat_fused = vfeat_fused2
+                vfeat_fused = vfeat2
+
+                # vfeat_fused: [2, 32, 32, 1792]
+                vfeat_fused = vfeat_fused.view([B0, H2, W2, self.feat_dim])
+                # vfeat_fused: [5, 32, 32, 1792] => [B, 1792, 32, 32]
+                vfeat_fused = vfeat_fused.permute([0, 3, 1, 2])
+
+                if self.do_out_fpn:
+                    vfeat_fused_fpn = self.out_fpn_forward(batch_base_feats, vfeat_fused, B0)
+                    trans_scores_small = self.out_conv(vfeat_fused_fpn)  # [4, 1792, 112, 112] --> 1 channel [4, 1, 112, 112]
+                else:
+                    # scores: [B0, 2, 28, 28]
+                    # if vfeat_fpn is already 28*28 (in_fpn_layers=='234'),
+                    # then out_upsampconv does not do upsampling.
+                    trans_scores_small = self.out_conv(vfeat_fused)
+            else:
+                # TODO
+                vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
+                # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
+                trans_scores_small = self.out_conv(vfeat_fused_fpn)
+
+            out_size = [int(H * self.output_scaleup), int(W * self.output_scaleup)]
+            # full_scores: [B0, 2, 112, 112] / XF: trans_scores_up = [B, 1, 224, 224]
+            trans_scores_up = F.interpolate(trans_scores_small, size=out_size,
+                                            mode='bilinear', align_corners=False)
+            # import pdb
+            # pdb.set_trace()
+            heatmap_roi_pred = trans_scores_up
+            # xiaofeng: try to generate feat for regression task for fun
+            roi_feats = self.relu(self.roi_gn(vfeat_fused_fpn))
+
+        else:
+            # (batch, 16, 256, 256)
+            # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
+            B, C, H, W = input_roi.shape
+            # xiaofeng add for test
+            # import pdb
+            # pdb.set_trace()
+            data_numpy = copy.deepcopy(input_roi)
+            data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
+            for i in range(B):
+                img = data_numpy.numpy()[i,:,:,:].astype('uint8')
+                # print("clahe: ", img.shape)
+                b, g, r = cv2.split(img)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                b = clahe.apply(b)
+                g = clahe.apply(g)
+                r = clahe.apply(r)
+                img = cv2.merge([b, g, r])
+                data_numpy[i,:,:,:] = torch.from_numpy(img)
+                # print("after clahe: ", img.shape)
+            data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
+
+            roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+            # roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+            roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+            # xiaofeng add for k=1 layer for ROI
+            roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+            # roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
+
+            # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
+            roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
+
+            # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
+            roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
+            roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+            # 32 channel --> 1 channel  (batch, 1, 256, 256)
+            heatmap_roi_pred = self.heatmap_roi(roi_feats)
+
         if infer_roi:
             # Get initial location from heatmap
             loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
@@ -625,9 +1035,16 @@ class FoveaNet(nn.Module):
         else:
             loc_pred_init = meta['pixel_in_roi'].cuda(non_blocking=True)
 
+        # roi_feats: (batch, 32, 256, 256) --> (batch, 32, 1, 1)
         loc_init_feat = crop_and_resize(roi_feats, loc_pred_init, output_size=1)
+        # (batch, 32, 1, 1) --> (batch, 32) / [B, 1792, 1, 1] --> [B, 1792]
         loc_init_feat = loc_init_feat[:, :, 0, 0]
-        offset_in_roi_pred = self.regress(loc_init_feat)
+        if self.cfg.TRAIN.EFF_NET:
+            # (batch, 1792) --> (batch, 2)
+            offset_in_roi_pred = self.eff_regress(loc_init_feat)
+        else:
+            # (batch, 32) --> (batch, 2)
+            offset_in_roi_pred = self.regress(loc_init_feat)
 
         return heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta
 

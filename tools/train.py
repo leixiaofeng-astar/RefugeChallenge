@@ -10,19 +10,17 @@ import pprint
 import shutil
 import importlib
 import time
-
 import torch
 import torch.nn.parallel
-from torch.utils.data import DataLoader, ConcatDataset
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
-
-import imgaug.augmenters as iaa
-from datetime import datetime
 from tensorboardX import SummaryWriter
+
+from torch.utils.data import DataLoader, ConcatDataset
+from datetime import datetime
 
 from config.common import _C as cfg
 from config.common import update_config
@@ -35,6 +33,7 @@ from utils.utils import create_logger
 
 import dataset
 import models
+
 
 def timer(start_time=None):
     if not start_time:
@@ -106,9 +105,7 @@ def main():
 
     # copy model file -- xiaofeng comment it
     # this_dir = os.path.dirname(__file__)
-    shutil.copy2(
     # shutil.copy2(os.path.join(this_dir, '../models', cfg.MODEL.NAME + '.py'), final_output_dir)
-        final_output_dir)
 
     writer_dict = {
         'writer': SummaryWriter(log_dir=tb_log_dir),
@@ -129,7 +126,6 @@ def main():
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT).cuda()
 
     # Data loading code
-    # xiaofeng apply grayscale conversion
     # normalize = transforms.Normalize(
     #     mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
     # )
@@ -140,18 +136,36 @@ def main():
     #         normalize,
     #     ])
     # )
-    # valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+    # valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
     #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
     #     transforms.Compose([
     #         transforms.ToTensor(),
     #         normalize,
     #     ])
     # )
+    # 
+    # train_loader = torch.utils.data.DataLoader(
+    #     train_dataset,
+    #     batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
+    #     shuffle=cfg.TRAIN.SHUFFLE,
+    #     num_workers=cfg.WORKERS,
+    #     pin_memory=cfg.PIN_MEMORY
+    # )
+    # valid_loader = torch.utils.data.DataLoader(
+    #     valid_dataset,
+    #     batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
+    #     shuffle=False,
+    #     num_workers=cfg.WORKERS,
+    #     pin_memory=cfg.PIN_MEMORY
+    # )
+
     db_trains = []
+    db_vals = []
+    final_full_test = cfg.TRAIN.FULL_DATA
     normalize_1 = transforms.Normalize(
-        mean=[0.138, 0.180, 0.237], std=[0.090, 0.117, 0.155]
+        mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
     )
-    train_dataset_1 = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
+    train_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
         cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, True,
         transforms.Compose([
             transforms.ToTensor(),
@@ -161,7 +175,7 @@ def main():
     db_trains.append(train_dataset_1)
 
     normalize_2 = transforms.Normalize(
-        mean=[0.260, 0.288, 0.357], std=[0.189, 0.212, 0.254]
+        mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
     )
     train_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
         cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, True,
@@ -172,22 +186,23 @@ def main():
     )
     db_trains.append(train_dataset_2)
 
-    normalize_3 = transforms.Normalize(
-        mean=[0.263, 0.288, 0.354], std=[0.190, 0.211, 0.251]
-    )
-    train_dataset_3 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, True,
-        transforms.Compose([
-            transforms.ToTensor(),
-            normalize_3,
-        ])
-    )
-    db_trains.append(train_dataset_3)
+    if final_full_test is True:
+        normalize_3 = transforms.Normalize(
+            mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+        )
+        train_dataset_3 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, True,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize_3,
+            ])
+        )
+        db_trains.append(train_dataset_3)
 
     train_dataset = ConcatDataset(db_trains)
-    logger.info("Combined dataset: Total {} images".format(len(train_dataset)))
+    logger.info("Combined Dataset: Total {} images".format(len(train_dataset)))
 
-    train_batch_size = cfg.TRAIN.BATCH_SIZE_PER_GPU*len(cfg.GPUS)
+    train_batch_size = cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=train_batch_size,
@@ -196,30 +211,51 @@ def main():
         pin_memory=cfg.PIN_MEMORY
     )
 
-    # normalize = transforms.Normalize(
-    #     mean = [0.263, 0.288, 0.354], std = [0.190, 0.211, 0.251]
-    # )
-    # valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-    #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
-    #     transforms.Compose([
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ])
-    # )
     normalize = transforms.Normalize(
-        mean = [0.156, 0.231, 0.335], std = [0.121, 0.164, 0.224]
+        mean=[0.404, 0.271, 0.222], std=[0.284, 0.202, 0.163]
     )
-    valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
+    val_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+        cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
         transforms.Compose([
             transforms.ToTensor(),
             normalize,
         ])
     )
-    test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS)
+    db_vals.append(val_dataset_1)
+
+    if final_full_test is True:
+        normalize_1 = transforms.Normalize(
+            mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
+        )
+        val_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize_1,
+            ])
+        )
+        db_vals.append(val_dataset_2)
+
+        normalize_2 = transforms.Normalize(
+            mean=[0.409, 0.270, 0.215], std=[0.288, 0.203, 0.160]
+        )
+        val_dataset_3 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize_2,
+            ])
+        )
+        db_vals.append(val_dataset_3)
+
+    valid_dataset = ConcatDataset(db_vals)
+
+    logger.info("Val Dataset: Total {} images".format(len(valid_dataset)))
+
+    test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
-        batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
+        batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
         shuffle=False,
         num_workers=cfg.WORKERS,
         pin_memory=cfg.PIN_MEMORY
@@ -237,12 +273,11 @@ def main():
         final_output_dir, 'checkpoint.pth'
     )
 
-    # xiaofeng change
-    # if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
-    if cfg.AUTO_RESUME and os.path.exists(checkpoint_file) and (cfg.TEST.MODEL_FILE is None):
+    if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
         logger.info("=> loading checkpoint '{}'".format(checkpoint_file))
         checkpoint = torch.load(checkpoint_file)
-        begin_epoch = checkpoint['epoch']
+        # begin_epoch = checkpoint['epoch']
+        begin_epoch = 0   # xiaofeng change it
         best_metric = checkpoint['metric']
         last_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
@@ -251,6 +286,8 @@ def main():
         logger.info("=> loaded checkpoint '{}' (epoch {})".format(
             checkpoint_file, checkpoint['epoch']))
 
+    # llr=lr∗gamma∗∗epoch
+    # torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma, last_epoch=-1)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, cfg.TRAIN.LR_STEP, cfg.TRAIN.LR_FACTOR,
         last_epoch=last_epoch
@@ -261,18 +298,26 @@ def main():
 
         lr_scheduler.step()
 
+        # evaluate on validation set
+        # lr_metric, hr_metric, final_metric = validate(
+        #     cfg, valid_loader, valid_dataset, model, criterion,
+        #     final_output_dir, tb_log_dir, writer_dict, db_vals
+        # )
+        # print("validation before training spent time:")
+        # timer(start_time)  # timing ends here for "start_time" variable
+
         # train for one epoch
         train(cfg, train_loader, model, criterion, optimizer, epoch,
               final_output_dir, tb_log_dir, writer_dict)
 
-        print("epoch %d train spent time:" %(epoch))
+        print("epoch %d train spent time:" % (epoch))
         train_time = timer(start_time)  # timing ends here for "start_time" variable
 
         # if epoch >= int(cfg.TRAIN.END_EPOCH/10):
         # evaluate on validation set
         lr_metric, hr_metric, final_metric = validate(
             cfg, valid_loader, valid_dataset, model, criterion,
-            final_output_dir, tb_log_dir, writer_dict
+            final_output_dir, tb_log_dir, writer_dict, db_vals
         )
 
         print("validation spent time:")
@@ -305,17 +350,43 @@ def main():
 
             print("saving spent time:")
             end_time = timer(val_time)  # timing ends here for "start_time" variable
+        elif (epoch % 100 == 0) and (epoch != 0):
+            logger.info('=> saving epoch {} checkpoint to {}'.format(epoch, final_output_dir))
+            # transfer the model to CPU before saving to fix unstable bug:
+            # github.com/pytorch/pytorch/issues/10577
+
+            time_str = time.strftime('%Y-%m-%d-%H-%M')
+            tmp_checkpoint_name = 'checkpoint_epoch%d_%s.pth' % (epoch, time_str)
+            model = model.cpu()
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'model': cfg.MODEL.NAME,
+                'state_dict': model.state_dict(),
+                'best_state_dict': model.module.state_dict(),
+                'metric': final_metric,
+                'optimizer': optimizer.state_dict(),
+            }, best_model, final_output_dir, tmp_checkpoint_name)
+            model = model.cuda()
 
     # xiaofeng change
     time_str = time.strftime('%Y-%m-%d-%H-%M')
-    model_name = 'final_state_%s.pth'%(time_str)
+    model_name = 'final_state_%s.pth' % (time_str)
     final_model_state_file = os.path.join(final_output_dir, model_name)
-    )
     logger.info('=> saving final model state to {}'.format(final_model_state_file))
-        final_model_state_file)
-    )
     torch.save(model.module.state_dict(), final_model_state_file)
     writer_dict['writer'].close()
+
+    # save a final checkpoint
+    model = model.cpu()
+    save_checkpoint({
+        'epoch': epoch + 1,
+        'model': cfg.MODEL.NAME,
+        'state_dict': model.state_dict(),
+        'best_state_dict': model.module.state_dict(),
+        'metric': final_metric,
+        'optimizer': optimizer.state_dict(),
+    }, best_model, final_output_dir, "checkpoint_final_state.pth")
+    model = model.cuda()
 
 
 if __name__ == '__main__':

@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from datetime import datetime
 
 from utils.transforms import get_affine_transform
 from utils.transforms import affine_transform
@@ -20,6 +21,15 @@ from utils.transforms import crop_and_resize
 
 
 logger = logging.getLogger(__name__)
+
+def timer(start_time=None):
+    if not start_time:
+        return datetime.now()
+    elif start_time:
+        newtime = datetime.now()
+        print('Time taken: %s microseconds.\n' % ((newtime - start_time).microseconds))
+        return datetime.now()
+		
 common_aug_func = iaa.Sequential(
 [
     # iaa.Sometimes(0.5, iaa.CropAndPad(
@@ -86,13 +96,14 @@ class FoveaDataset(Dataset):
         db_rec = copy.deepcopy(self.db[idx])
 
         # load data
-        image_file = db_rec['image']
-        data_numpy = cv2.imread(
-            image_file, cv2.IMREAD_COLOR
-        )
+        # xiaofeng modify it for data fetch accelerate
+        data_numpy = db_rec['image']
+        filename = db_rec['filename']
+
         if data_numpy is None:
-            logger.error('=> fail to read {}'.format(image_file))
-            raise ValueError('Fail to read {}'.format(image_file))
+            logger.error('=> fail to read {}'.format(idx))
+            raise ValueError('Fail to read {}'.format(idx))
+
         if 'fovea' in db_rec.keys():
             fovea = np.array(db_rec['fovea'])
         else:
@@ -113,11 +124,9 @@ class FoveaDataset(Dataset):
         # img_gray2 = img_gray * alpha
         # img_gray2 = img_gray2.reshape(img_gray2.shape[0], img_gray2.shape[1], -1)
         # img_gray3 = np.tile(img_gray2, [1, 1, 3])
-        #
         # data_numpy = data_numpy.astype(np.float)
         # data_numpy = data_numpy * alpha + img_gray3
         #
-        # cmin = data_numpy.min()
         # cmax = data_numpy.max()
         # Thr0 = 250
         # if (cmax > Thr0):
@@ -172,6 +181,9 @@ class FoveaDataset(Dataset):
                                                      (pw, self.image_size[0]-nw-pw), (0, 0)), mode='constant')
                     fovea[0] += pw
                     fovea[1] += ph
+        #test
+        # print("scaling")
+        # tmp_time = timer(tmp_time)
 
         image_size = self.image_size
         # crop image from center
@@ -202,6 +214,14 @@ class FoveaDataset(Dataset):
                 fovea = fliplr_coord(fovea, data_numpy.shape[1])
                 c[0] = data_numpy.shape[1] - c[0] - 1
 
+        # xiaofeng test, don't do affine always
+        affine_applied = True
+        if self.is_train and np.random.randn() > 0.9:
+            r = 0
+            s = 0
+            affine_applied = False
+            # print("ignore affine")
+
         trans = get_affine_transform(c, r, image_size, shift=s)
         input = cv2.warpAffine(
             data_numpy,
@@ -213,24 +233,46 @@ class FoveaDataset(Dataset):
 
         if self.is_train:
             patch_size = self.patch_size.astype(np.int32)
-            # xiaofeng modify it
-            # pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
-            # ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
-            pw = np.random.randint(0, int(image_size[1] - patch_size[0] + 1))
-            ph = np.random.randint(0, int(image_size[0] - patch_size[1] + 1))
-            input = input[ph:ph+patch_size[1], pw:pw+patch_size[0], :]
+            pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
+            ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
+            orig_fovea = copy.deepcopy(fovea)
             fovea[0] -= pw
             fovea[1] -= ph
+            while (fovea[0] < 0 or fovea[1] < 0 or fovea[0] >= patch_size[0] or fovea[1] >= patch_size[1] ):
+                pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
+                ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
+                fovea[0] = orig_fovea[0] - pw
+                fovea[1] = orig_fovea[1] - ph
+            input = input[ph:ph + patch_size[1], pw:pw + patch_size[0], :]
+            # print("fovea, orig_fovea, pw, ph, input.shape: ", fovea, orig_fovea, pw, ph, input.shape)
+            # print("fovea, pw, ph, input.shape: ", fovea, pw, ph, input.shape)
 
-        if self.transform:
-            input = self.transform(input)
+        try:
+            if self.transform:
+                input = self.transform(input)
+        except:
+            print("crash info: ", fovea, input.shape, affine_applied)
 
-        meta = {'fovea': fovea,
-                'image': image_file}
+        # print("image: %s=d" %(idx))
+        # print("fovea and size: ", fovea, input.shape)
+        meta = {'fovea': fovea, 'image': filename}
 
         if self.is_train:
             heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight = \
                 self.generate_target(input, fovea)
+
+            # xiaofeng change
+            # data_numpy = copy.deepcopy(input)
+            # b, g, r = cv2.split(data_numpy)
+            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            # b = clahe.apply(b)
+            # g = clahe.apply(g)
+            # r = clahe.apply(r)
+            # data_numpy = cv2.merge([b, g, r])
+            #
+            # input_roi = crop_and_resize(data_numpy.unsqueeze(0),
+            #                             torch.from_numpy(roi_center).unsqueeze(0),
+            #                             output_size=2 * self.region_radius, scale=1.0)[0]
 
             # crop ROI
             input_roi = crop_and_resize(input.unsqueeze(0),
@@ -277,17 +319,24 @@ class FoveaDataset(Dataset):
                                    dtype=np.float32)
             target_weight = np.array([1.], np.float32)
 
+            # xiaofeng comment: it is 2x3
             tmp_size = self.sigma * 3
-
+            # xiaofeng comment: feat_stride = self.ds_factor = 4
             feat_stride = image_size / image_ds_size
             mu_x = int(fovea[0] / feat_stride[0] + 0.5)
             mu_y = int(fovea[1] / feat_stride[1] + 0.5)
             # Check that any part of the gaussian is in-bounds
             ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
             br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+            # xiaofeng think it should be a bug, but it will always bypass the code as below
             if ul[0] >= image_ds_size[0] or ul[1] >= image_ds_size[1] \
-                    or br[0] < 0 or br[1] < 0 or fovea[0] < 0 or fovea[1] < 0:
+                    or br[0] < 0 or br[1] < 0:
+            # if br[0] >= image_ds_size[0] or br[1] >= image_ds_size[1] \
+            #                 or ul[0] < 0 or ul[1] < 0:
                 # If not, just return the image as is
+                import pdb
+                pdb.set_trace()
+                raise("XF debug: wrong ds region")
                 target_weight = np.array([0.], np.float32)
                 region_size = 2 * self.region_radius
                 heatmap_roi = np.zeros((1, region_size, region_size), dtype=np.float32)
@@ -316,6 +365,7 @@ class FoveaDataset(Dataset):
                 g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
 
             # sample a noisily centered ROI region for high-resolution target
+            # xiaofeng comment: offset = 8
             offset = self.max_ds_offset
             region_size = self.region_radius * 2
             sign_x = 1 if np.random.rand() > 0.5 else -1
@@ -340,16 +390,24 @@ class FoveaDataset(Dataset):
                                    dtype=np.float32)
             target_weight = np.array([1.], np.float32)
 
-            tmp_size = self.sigma * 3
+            # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
+            hr_sigma = self.sigma * 3
+            tmp_size = hr_sigma * 3
 
             mu_x = int(fovea_in_roi[0] + 0.5)
             mu_y = int(fovea_in_roi[1] + 0.5)
             # Check that any part of the gaussian is in-bounds
             ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
             br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+            ## xiaofeng think it should be a bug, but it will always bypass the code as below
             if ul[0] >= region_size or ul[1] >= region_size \
-                    or br[0] < 0 or br[1] < 0 or fovea_in_roi[0] < 0 or fovea_in_roi[1] < 0:
+                    or br[0] < 0 or br[1] < 0:
+            # if br[0] >= region_size or br[1] >= region_size \
+            #         or ul[0] < 0 or ul[1] < 0:
                 # If not, just return the image as is
+                import pdb
+                pdb.set_trace()
+                raise ("XF debug: wrong ROI region")
                 target_weight = np.array([0.], np.float32)
                 heatmap_roi = np.zeros((1, region_size, region_size), dtype=np.float32)
                 roi_center = np.array([-1, -1], np.float32)
@@ -364,7 +422,7 @@ class FoveaDataset(Dataset):
             y = x[:, np.newaxis]
             x0 = y0 = size // 2
             # The gaussian is not normalized, we want the center value to equal 1
-            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * self.sigma ** 2))
+            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (hr_sigma) ** 2))
 
             # Usable gaussian range
             g_x = max(0, -ul[0]), min(br[0], region_size) - ul[0]

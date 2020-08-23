@@ -60,6 +60,56 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+"""
+        Zhang Yu original -- mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
+        before gray conv
+        'mean': { 'train':  [0.449, 0.260, 0.130],
+          'test':   [0.654, 0.458, 0.364],
+          'valid':  [0.662, 0.459, 0.356],
+          'valid2': [0.684, 0.384, 0.163] },
+        'std':  { 'train':  [0.240, 0.151, 0.086],
+          'test':   [0.215, 0.185, 0.144],
+          'valid':  [0.217, 0.185, 0.144],
+          'valid2': [0.210, 0.157, 0.127] },
+
+        after gray conv
+        'mean': { 'train':  [0.400, 0.298, 0.229],
+                  'test':   [0.590, 0.490, 0.442],
+                  'valid':  [0.596, 0.493, 0.440],
+                  'valid2': [0.566, 0.416, 0.306] },
+        'std':  { 'train':  [0.176, 0.140, 0.108],
+                  'test':   [0.184, 0.174, 0.153],
+                  'valid':  [0.184, 0.174, 0.152],
+                  'valid2': [0.184, 0.159, 0.140] },
+
+    before CLAHE
+    train:
+        mean = [0.084, 0.168, 0.282], std = [0.062, 0.110, 0.189]
+        mean = [0.282, 0.168, 0.084], std = [0.189, 0.110, 0.062]
+    val:
+        mean = [0.215, 0.270, 0.409], std = [0.160, 0.203, 0.288]
+        mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
+    test:
+        mean = [0.222, 0.271, 0.404], std = [0.163, 0.202, 0.284]
+        mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+    val2:
+        mean = [0.059, 0.208, 0.417], std = [0.079, 0.152, 0.273]
+        mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
+
+    after CLAHE
+        train: 
+        mean = [0.134, 0.227, 0.316], std = [0.089, 0.142, 0.197]
+
+        val:
+        mean = [0.257, 0.303, 0.390], std = [0.186, 0.219, 0.268]
+
+        test:
+        mean = [0.262, 0.303, 0.386], std = [0.188, 0.218, 0.264]
+
+        val2:
+        mean = [0.128, 0.283, 0.422], std = [0.135, 0.187, 0.262]
+
+"""
 
 def main():
     args = parse_args()
@@ -81,7 +131,12 @@ def main():
 
     if cfg.TEST.MODEL_FILE:
         logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
-        model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
+        (filepath, tempfilename) = os.path.split(cfg.TEST.MODEL_FILE)
+        if "checkpoint" in tempfilename:
+            checkpoint = torch.load(cfg.TEST.MODEL_FILE)
+            model.load_state_dict(checkpoint['best_state_dict'])
+        else:
+            model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
     else:
         model_state_file = os.path.join(
             final_output_dir, 'final_state.pth'
@@ -98,65 +153,31 @@ def main():
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT).cuda()
 
     # Data loading code
-    """
-        before gray conv
-        'mean': { 'train':  [0.449, 0.260, 0.130],
-          'test':   [0.654, 0.458, 0.364],
-          'valid':  [0.662, 0.459, 0.356],
-          'valid2': [0.684, 0.384, 0.163] },
-        'std':  { 'train':  [0.240, 0.151, 0.086],
-          'test':   [0.215, 0.185, 0.144],
-          'valid':  [0.217, 0.185, 0.144],
-          'valid2': [0.210, 0.157, 0.127] },
-          
-        after gray conv
-        Calculating /home/user/eye/xf_refuge/data/REFUGE-Training400/Training400/...
-        mean:
-        [0.138, 0.180, 0.237]
-        std:
-        [0.090, 0.117, 0.155]
-        Calculating /home/user/eye/xf_refuge/data/REFUGE-Validation400/...
-        mean:
-        [0.260, 0.288, 0.357]
-        std:
-        [0.189, 0.212, 0.254]
-        Calculating /home/user/eye/xf_refuge/data/REFUGE-Test400/...
-        mean:
-        [0.263, 0.288, 0.354]
-        std:
-        [0.190, 0.211, 0.251]
-        Calculating /home/user/eye/xf_refuge/data/Refuge2-Validation/...
-        mean:
-        [0.156, 0.231, 0.335]
-        std:
-        [0.121, 0.164, 0.224]
-
-    """
-    normalize = transforms.Normalize(
-        # xiaofeng change it for test set
-        # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]  # original one
-
-        # test set
-        # mean = [0.263, 0.288, 0.354], std = [0.190, 0.211, 0.251]
-        # val2 set
-        mean = [0.156, 0.231, 0.335], std = [0.121, 0.164, 0.224]
-
-    )
-    # dataset.refuge.Dataset class -- (self, cfg, root, image_set, is_train, transform=None)
-    # xiaofeng test
-    # valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
-    #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
-    #     transforms.Compose([
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ])
-    valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
-        transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
+    release_result = False
+    if release_result is False:
+        normalize = transforms.Normalize(
+            # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
+            mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+        )
+        valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+    else:
+        normalize = transforms.Normalize(
+            # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
+            mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
+        )
+        valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),

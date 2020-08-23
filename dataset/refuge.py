@@ -26,7 +26,8 @@ class Dataset(FoveaDataset):
         self.image_set = image_set
         self.db = self._get_db(image_set)
 
-        test_img = cv2.imread(self.db[0]['image'], cv2.IMREAD_COLOR)
+        # test_img = cv2.imread(self.db[0]['image'], cv2.IMREAD_COLOR)
+        test_img = self.db[0]['image']
         self.db_image_size = np.array([test_img.shape[1], test_img.shape[0]])
 
         if is_train and cfg.DATASET.TRAIN_FOLD > 0:
@@ -49,109 +50,167 @@ class Dataset(FoveaDataset):
             return False
 
     def _get_db(self, image_set):
-        # training images and labels
-        train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
-                                           'Annotation-Training400', 'Fovea_location.xlsx')
-        workbook = load_workbook(train_anno_filename)
-        booksheet = workbook.active
-        rows = booksheet.rows
-        columns = booksheet.columns
-        train_db = []
-        for i, row in enumerate(rows, 1):
-            if i == 1: continue # skip the first row
-            # substract 1 pixel as we assume indexing from zero
-            fx = float(booksheet.cell(row=i, column=3).value) - 1
-            fy = float(booksheet.cell(row=i, column=4).value) - 1
-            fname = booksheet.cell(row=i, column=2).value
-            if fname[0] == 'n':
-                image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Non-Glaucoma', fname)
-            elif fname[0] == 'g':
-                image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
-            else:
-                assert False, 'unkown entry: %s' %(fname)
-            if not self.is_image_file(image_file): continue
-
-            train_db.append({
-                'image': image_file,
-                'fovea': np.array([fx, fy], np.float32)
-            })
-
-        # validation images and labels
-        val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations.xlsx')
-        workbook = load_workbook(val_anno_filename)
-        booksheet = workbook.active
-        rows = booksheet.rows
-        columns = booksheet.columns
-        val_db = []
-        for i, row in enumerate(rows, 1):
-            if i == 1: continue # skip the first row
-            # substract 1 pixel as we assume indexing from zero
-            fx = float(booksheet.cell(row=i, column=4).value) - 1
-            fy = float(booksheet.cell(row=i, column=5).value) - 1
-            fname = booksheet.cell(row=i, column=2).value
-            image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Validation400', fname)
-            if not self.is_image_file(image_file): continue
-
-            val_db.append({
-                'image': image_file,
-                'fovea': np.array([fx, fy], np.float32)
-            })
-
-        # test images and labels
-        test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
-        workbook = load_workbook(test_anno_filename)
-        booksheet = workbook.active
-        rows = booksheet.rows
-        columns = booksheet.columns
-        test_db = []
-        for i, row in enumerate(rows, 1):
-            if i == 1: continue # skip the first row
-            # substract 1 pixel as we assume indexing from zero
-            fx = float(booksheet.cell(row=i, column=4).value) - 1
-            fy = float(booksheet.cell(row=i, column=5).value) - 1
-            fname = booksheet.cell(row=i, column=2).value
-            image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
-            if not self.is_image_file(image_file): continue
-
-            test_db.append({
-                'image': image_file,
-                'fovea': np.array([fx, fy], np.float32)
-            })
-
-        # TODO: refuge2 validation db -- xiaofeng comment
-        # refuge2 validation images and labels
-        val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
-        workbook = load_workbook(val2_anno_filename)
-        booksheet = workbook.active
-        rows = booksheet.rows
-        columns = booksheet.columns
-        val2_db = []
-        for i, row in enumerate(rows, 1):
-            if i == 1: continue  # skip the first row
-            # substract 1 pixel as we assume indexing from zero
-            fx = float(booksheet.cell(row=i, column=4).value) - 1
-            fy = float(booksheet.cell(row=i, column=5).value) - 1
-            fname = booksheet.cell(row=i, column=2).value
-            image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
-            if not self.is_image_file(image_file): continue
-
-            val2_db.append({
-                'image': image_file,
-                'fovea': np.array([fx, fy], np.float32)
-            })
 
         if image_set == 'train':
+            # training images and labels
+            train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
+                                               'Annotation-Training400', 'Fovea_location.xlsx')
+            workbook = load_workbook(train_anno_filename)
+            booksheet = workbook.active
+            rows = booksheet.rows
+            columns = booksheet.columns
+            train_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=3).value) - 1
+                fy = float(booksheet.cell(row=i, column=4).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                if fname[0] == 'n':
+                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Non-Glaucoma', fname)
+                elif fname[0] == 'g':
+                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
+                else:
+                    assert False, 'unkown entry: %s' % (fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                train_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
             return train_db
         elif image_set == 'test':
+            # test images and labels
+            test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+            workbook = load_workbook(test_anno_filename)
+            booksheet = workbook.active
+            rows = booksheet.rows
+            columns = booksheet.columns
+            test_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=4).value) - 1
+                fy = float(booksheet.cell(row=i, column=5).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                test_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
             return test_db
         elif image_set == 'val':
+            # validation images and labels
+            val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations.xlsx')
+            workbook = load_workbook(val_anno_filename)
+            booksheet = workbook.active
+            rows = booksheet.rows
+            columns = booksheet.columns
+            val_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=4).value) - 1
+                fy = float(booksheet.cell(row=i, column=5).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Validation400', fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                val_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
             return val_db
         elif image_set == 'train+val':
+            # training images and labels
+            train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
+                                               'Annotation-Training400', 'Fovea_location.xlsx')
+            workbook = load_workbook(train_anno_filename)
+            booksheet = workbook.active
+            rows = booksheet.rows
+            columns = booksheet.columns
+            train_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=3).value) - 1
+                fy = float(booksheet.cell(row=i, column=4).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                if fname[0] == 'n':
+                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Non-Glaucoma', fname)
+                elif fname[0] == 'g':
+                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
+                else:
+                    assert False, 'unkown entry: %s' % (fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                train_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
+
+            # validation images and labels
+            val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations.xlsx')
+            workbook = load_workbook(val_anno_filename)
+            booksheet = workbook.active
+        elif image_set == 'test':
+            rows = booksheet.rows
+            columns = booksheet.columns
+            val_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=4).value) - 1
+                fy = float(booksheet.cell(row=i, column=5).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Validation400', fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                val_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
             return train_db + val_db
         elif image_set == 'val2':
+            # TODO: refuge2 validation db -- xiaofeng comment
+            # refuge2 validation images and labels
+            val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
+            workbook = load_workbook(val2_anno_filename)
+            booksheet = workbook.active
+            rows = booksheet.rows
+            columns = booksheet.columns
+            val2_db = []
+            for i, row in enumerate(rows, 1):
+                if i == 1: continue  # skip the first row
+                # substract 1 pixel as we assume indexing from zero
+                fx = float(booksheet.cell(row=i, column=4).value) - 1
+                fy = float(booksheet.cell(row=i, column=5).value) - 1
+                fname = booksheet.cell(row=i, column=2).value
+                image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
+                if not self.is_image_file(image_file): continue
+
+                data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
+                val2_db.append({
+                    'image': data_numpy,
+                    'fovea': np.array([fx, fy], np.float32),
+                    'filename': image_file,
+                })
             return val2_db
         else:
-            assert('Unknown image set: %s' %(image_set))
+            assert ('Unknown image set: %s' % (image_set))
+
 
     def evaluate(self, preds, output_dir):
         num_images = len(self.db)
@@ -180,7 +239,7 @@ class Dataset(FoveaDataset):
                 cw = csv.writer(f, delimiter=",", lineterminator="\n")
                 cw.writerow(['ImageName', 'Fovea_X', 'Fovea_Y'])
                 for _ in range(num_images):
-                    image_name = os.path.basename(self.db[_]['image'])
+                    image_name = os.path.basename(self.db[_]['filename'])
                     fovea_x = '%.2f' %(preds[_, 0] + 1)
                     fovea_y = '%.2f' %(preds[_, 1] + 1)
                     cw.writerow([image_name, fovea_x, fovea_y])
