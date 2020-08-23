@@ -551,8 +551,8 @@ class FoveaNet(nn.Module):
                                bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # xf add it
-        self.conv3 = nn.Conv2d(64, 16, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(16)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(64)
 
         self.relu = nn.ReLU(inplace=True)
         
@@ -907,7 +907,6 @@ class FoveaNet(nn.Module):
             MOD = 0
             B0 = batch.shape[0]
             B, C, H, W = batch.shape
-            orig_SH_alg = False
 
             with torch.no_grad():
                 # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
@@ -941,54 +940,21 @@ class FoveaNet(nn.Module):
 
             scale = torch.tensor([[scale_H, scale_W]], device='cuda')
 
-            if orig_SH_alg:
+            # TODO
+            vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
+            # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
+            # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
 
-                # xy_indices: [3920, 2]
-                # Rectify the scales on H, W.  xy_indices: [14, 14, 2]
-                # xy_indices = xy_indices.view([-1, 2]).float() * scale
+            # curr_feat:            XF: 3: [4, 160, 28, 28]
+            # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+            # curr_feat = batch_base_feats[3]
+            # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
+            #                                                               size=curr_feat.shape[2:],
+            #                                                               mode=self.fpn_interp_mode,
+            #                                                               align_corners=self.align_corners)
 
-                # voxels_pos: [B0, 3920, 2], "2" is coordinates. -- [B, 14x14, 2]
-                # voxels_pos = xy_indices.unsqueeze(0).repeat((B0, 1, 1))
-
-                # vfeat = self.featemb(vfeat_fpn, voxels_pos)
-                # vfeat2 = vfeat * vmask.unsqueeze(2)
-                # XF: vfeat_fpn [B, 14x14, 1792]  vmask: [B, 14x14, 1]
-                vfeat2 = vfeat_fpn * vmask.unsqueeze(2)
-
-                # vfeat_fused: [2, 784, 256]
-                # vfeat_fused2 = self.voxel_fusion(vfeat2)
-                # vfeat_fused = vfeat_fused2
-                vfeat_fused = vfeat2
-
-                # vfeat_fused: [2, 32, 32, 1792]
-                vfeat_fused = vfeat_fused.view([B0, H2, W2, self.feat_dim])
-                # vfeat_fused: [5, 32, 32, 1792] => [B, 1792, 32, 32]
-                vfeat_fused = vfeat_fused.permute([0, 3, 1, 2])
-
-                if self.do_out_fpn:
-                    vfeat_fused_fpn = self.out_fpn_forward(batch_base_feats, vfeat_fused, B0)
-                    trans_scores_small = self.out_conv(vfeat_fused_fpn)  # [4, 1792, 112, 112] --> 1 channel [4, 1, 112, 112]
-                else:
-                    # scores: [B0, 2, 28, 28]
-                    # if vfeat_fpn is already 28*28 (in_fpn_layers=='234'),
-                    # then out_upsampconv does not do upsampling.
-                    trans_scores_small = self.out_conv(vfeat_fused)
-            else:
-                # TODO
-                vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
-                # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
-                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
-
-                # curr_feat:            XF: 3: [4, 160, 28, 28]
-                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
-                # curr_feat = batch_base_feats[3]
-                # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
-                #                                                               size=curr_feat.shape[2:],
-                #                                                               mode=self.fpn_interp_mode,
-                #                                                               align_corners=self.align_corners)
-                
-                # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
-                trans_scores_small = self.out_conv(vfeat_fused_fpn)
+            # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
+            trans_scores_small = self.out_conv(vfeat_fused_fpn)
 
             out_size = [int(H * self.output_scaleup), int(W * self.output_scaleup)]
             # full_scores: [B0, 2, 112, 112] / XF: trans_scores_up = [B, 1, 224, 224]
@@ -1003,31 +969,34 @@ class FoveaNet(nn.Module):
         else:
             # (batch, 16, 256, 256)
             # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
-            B, C, H, W = input_roi.shape
-            # xiaofeng add for test
-            # import pdb
-            # pdb.set_trace()
-            data_numpy = copy.deepcopy(input_roi)
-            data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
-            for i in range(B):
-                img = data_numpy.numpy()[i,:,:,:].astype('uint8')
-                # print("clahe: ", img.shape)
-                b, g, r = cv2.split(img)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-                b = clahe.apply(b)
-                g = clahe.apply(g)
-                r = clahe.apply(r)
-                img = cv2.merge([b, g, r])
-                data_numpy[i,:,:,:] = torch.from_numpy(img)
-                # print("after clahe: ", img.shape)
-            data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
+            if self.cfg.TRAIN.ROI_CLAHE:
+                B, C, H, W = input_roi.shape
+                # xiaofeng add for test
+                # import pdb
+                # pdb.set_trace()
+                data_numpy = copy.deepcopy(input_roi)
+                data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
+                for i in range(B):
+                    img = data_numpy.numpy()[i,:,:,:].astype('uint8')
+                    # print("clahe: ", img.shape)
+                    b, g, r = cv2.split(img)
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                    b = clahe.apply(b)
+                    g = clahe.apply(g)
+                    r = clahe.apply(r)
+                    img = cv2.merge([b, g, r])
+                    data_numpy[i,:,:,:] = torch.from_numpy(img)
+                    # print("after clahe: ", img.shape)
+                data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
 
-            roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
-            # roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+                roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+            else:
+                roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+
             roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
             # xiaofeng add for k=1 layer for ROI
             roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
-            # roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
+            roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
 
             # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
             roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)

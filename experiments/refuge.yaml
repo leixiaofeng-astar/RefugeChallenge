@@ -39,6 +39,7 @@ MODEL:
   - 1024
   DS_FACTOR: 4
   SIGMA: 2
+  SIGMA_ROI: 4
   MAX_DS_OFFSET: 8
   MAX_OFFSET: 8
   REGION_RADIUS: 128
@@ -105,7 +106,8 @@ TRAIN:
   BEGIN_EPOCH: 0
   END_EPOCH: 400
   OPTIMIZER: adam
-  LR: 0.0001
+  LR: 0.001
+  LR_EXP: true
   LR_FACTOR: 0.1
   LR_STEP:
   - 170
@@ -117,9 +119,12 @@ TRAIN:
   NESTEROV: false
   FULL_DATA: false
   EFF_NET: false
+  DATA_CLAHE: false
+  ROI_CLAHE: false
 TEST:
   BATCH_SIZE_PER_GPU: 4
-  FLIP_TEST: true 
+  FLIP_TEST: true
+  RELEASE_TEST: false
   MODEL_FILE: ''
 DEBUG:
   DEBUG: true

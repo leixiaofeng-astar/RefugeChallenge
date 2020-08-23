@@ -29,7 +29,7 @@ def timer(start_time=None):
         newtime = datetime.now()
         print('Time taken: %s microseconds.\n' % ((newtime - start_time).microseconds))
         return datetime.now()
-		
+
 common_aug_func = iaa.Sequential(
 [
     # iaa.Sometimes(0.5, iaa.CropAndPad(
@@ -76,9 +76,11 @@ class FoveaDataset(Dataset):
         self.patch_size = np.array(cfg.MODEL.PATCH_SIZE)
         self.ds_factor = np.array(cfg.MODEL.DS_FACTOR)
         self.sigma = cfg.MODEL.SIGMA
+        self.sigma_roi = cfg.MODEL.SIGMA_ROI
         self.max_ds_offset = cfg.MODEL.MAX_DS_OFFSET
         self.max_offset = cfg.MODEL.MAX_OFFSET
         self.region_radius = cfg.MODEL.REGION_RADIUS
+        self.clahe_enaled = cfg.TRAIN.DATA_CLAHE
 
         self.transform = transform
         self.db = []
@@ -110,12 +112,10 @@ class FoveaDataset(Dataset):
             fovea = np.array([-1, -1])
 
         # xiaofeng add for test
-		'''
         # gray_trans = iaa.Grayscale(alpha=0.5)
         # im = data_numpy[:, :, ::-1]  # Change channels to RGB
         # im = gray_trans.augment_image(im)
         # data_numpy = im[:, :, ::-1]  # Change channels to RGB
-		'''
 
         # alpha = 0.5
         # img_temp = data_numpy.copy()
@@ -262,22 +262,23 @@ class FoveaDataset(Dataset):
                 self.generate_target(input, fovea)
 
             # xiaofeng change
-            # data_numpy = copy.deepcopy(input)
-            # b, g, r = cv2.split(data_numpy)
-            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            # b = clahe.apply(b)
-            # g = clahe.apply(g)
-            # r = clahe.apply(r)
-            # data_numpy = cv2.merge([b, g, r])
-            #
-            # input_roi = crop_and_resize(data_numpy.unsqueeze(0),
-            #                             torch.from_numpy(roi_center).unsqueeze(0),
-            #                             output_size=2 * self.region_radius, scale=1.0)[0]
+            if self.clahe_enaled:
+                data_numpy = copy.deepcopy(input)
+                b, g, r = cv2.split(data_numpy)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                b = clahe.apply(b)
+                g = clahe.apply(g)
+                r = clahe.apply(r)
+                data_numpy = cv2.merge([b, g, r])
 
-            # crop ROI
-            input_roi = crop_and_resize(input.unsqueeze(0),
-                                        torch.from_numpy(roi_center).unsqueeze(0),
-                                        output_size=2*self.region_radius, scale=1.0)[0]
+                input_roi = crop_and_resize(data_numpy.unsqueeze(0),
+                                            torch.from_numpy(roi_center).unsqueeze(0),
+                                            output_size=2 * self.region_radius, scale=1.0)[0]
+            else:
+                # crop ROI
+                input_roi = crop_and_resize(input.unsqueeze(0),
+                                            torch.from_numpy(roi_center).unsqueeze(0),
+                                            output_size=2*self.region_radius, scale=1.0)[0]
 
             heatmap_ds = torch.from_numpy(heatmap_ds).float()
             heatmap_roi = torch.from_numpy(heatmap_roi).float()
@@ -391,8 +392,7 @@ class FoveaDataset(Dataset):
             target_weight = np.array([1.], np.float32)
 
             # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
-            hr_sigma = self.sigma * 3
-            tmp_size = hr_sigma * 3
+            tmp_size = self.sigma_roi * 3
 
             mu_x = int(fovea_in_roi[0] + 0.5)
             mu_y = int(fovea_in_roi[1] + 0.5)
@@ -422,7 +422,7 @@ class FoveaDataset(Dataset):
             y = x[:, np.newaxis]
             x0 = y0 = size // 2
             # The gaussian is not normalized, we want the center value to equal 1
-            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (hr_sigma) ** 2))
+            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
 
             # Usable gaussian range
             g_x = max(0, -ul[0]), min(br[0], region_size) - ul[0]

@@ -36,6 +36,7 @@ _C.MODEL.CROP_SIZE = [1536, 1536]  # width * height
 _C.MODEL.PATCH_SIZE = [1024, 1024] # width * height
 _C.MODEL.DS_FACTOR = 4
 _C.MODEL.SIGMA = 2
+_C.MODEL.SIGMA_ROI = 2
 _C.MODEL.MAX_DS_OFFSET = 8 # in number of pixels at downsampled scale
 _C.MODEL.MAX_OFFSET = 8 # in number of pixels at original scale
 _C.MODEL.REGION_RADIUS = 128 # in number of pixels at image scale
@@ -69,6 +70,7 @@ _C.TRAIN = CN()
 _C.TRAIN.LR_FACTOR = 0.1
 _C.TRAIN.LR_STEP = [90, 110]
 _C.TRAIN.LR = 0.001
+_C.TRAIN.LR_EXP = False
 
 _C.TRAIN.OPTIMIZER = 'adam'
 _C.TRAIN.MOMENTUM = 0.9
@@ -78,6 +80,8 @@ _C.TRAIN.GAMMA1 = 0.99
 _C.TRAIN.GAMMA2 = 0.0
 _C.TRAIN.FULL_DATA = False
 _C.TRAIN.EFF_NET = False
+_C.TRAIN.DATA_CLAHE = False
+_C.TRAIN.ROI_CLAHE = False
 
 _C.TRAIN.BEGIN_EPOCH = 0
 _C.TRAIN.END_EPOCH = 140
@@ -93,6 +97,7 @@ _C.TEST = CN()
 
 _C.TEST.BATCH_SIZE_PER_GPU = 1
 _C.TEST.FLIP_TEST = True
+_C.TEST.RELEASE_TEST = False
 _C.TEST.MODEL_FILE = ''
 
 # debug

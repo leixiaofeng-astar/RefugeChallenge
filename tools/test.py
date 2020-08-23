@@ -153,7 +153,7 @@ def main():
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT).cuda()
 
     # Data loading code
-    release_result = False
+    release_result = cfg.TEST.RELEASE_TEST
     if release_result is False:
         normalize = transforms.Normalize(
             # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]

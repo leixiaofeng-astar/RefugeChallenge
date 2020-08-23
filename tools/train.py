@@ -286,12 +286,14 @@ def main():
         logger.info("=> loaded checkpoint '{}' (epoch {})".format(
             checkpoint_file, checkpoint['epoch']))
 
-    # llr=lr∗gamma∗∗epoch
-    # torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma, last_epoch=-1)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, cfg.TRAIN.LR_STEP, cfg.TRAIN.LR_FACTOR,
-        last_epoch=last_epoch
-    )
+    if cfg.TRAIN.LR_EXP:
+        # llr=lr∗gamma∗∗epoch
+        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, cfg.TRAIN.GAMMA1, last_epoch=-1)
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, cfg.TRAIN.LR_STEP, cfg.TRAIN.LR_FACTOR,
+            last_epoch=last_epoch
+        )
 
     for epoch in range(begin_epoch, cfg.TRAIN.END_EPOCH):
         start_time = timer()
