@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import cv2
 import copy
+import numpy as np
 
 from core.inference import get_max_preds
 from utils.transforms import crop_and_resize
@@ -531,6 +532,7 @@ class FoveaNet(nn.Module):
         self.heatmap_ds = nn.Sequential(
             nn.Conv2d(16, 1, kernel_size=1, padding=0)
         )
+        self.hrnet_only = cfg.TRAIN.HRNET_ONLY
 
         # stem net
         # self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1,
@@ -882,149 +884,160 @@ class FoveaNet(nn.Module):
         # 16 channel --> 1 channel / (batch, 16, 256, 256) --> (batch, 1, 256, 256)
         heatmap_ds_pred = self.heatmap_ds(input_ds_feats)
 
-        # High-resolution branch
-        region_size = 2 * self.cfg.MODEL.REGION_RADIUS
-        if infer_roi:
-            # Get the predicted ROI
-            roi_center = get_max_preds(heatmap_ds_pred.cpu().numpy())[0][:, 0, :]
-            roi_center = torch.FloatTensor(roi_center)
-            roi_center *= ds_factor
-            roi_center = roi_center.cuda(non_blocking=True)
-            input_roi = crop_and_resize(input, roi_center, region_size)
+        if self.hrnet_only:
+            # Fill in the dummy data
+            region_size = 2 * self.cfg.MODEL.REGION_RADIUS
+            B = heatmap_ds_pred.shape[0]
+            heatmap_roi_pred = torch.FloatTensor(np.zeros((B, 1, region_size, region_size), dtype=np.float32))
+            offset_in_roi_pred = torch.FloatTensor(np.tile(np.array([-1, -1], np.float32), (4, 1)))
             meta.update(
-                {'roi_center': roi_center.cpu(),
-                 'input_roi': input_roi.cpu()
+                {'roi_center': offset_in_roi_pred.cpu(),
+                 'input_roi': heatmap_roi_pred.cpu()
                  })
         else:
-            assert 'roi_center' in meta.keys()
-            roi_center = meta['roi_center'].cuda(non_blocking=True)
+            # High-resolution branch
+            region_size = 2 * self.cfg.MODEL.REGION_RADIUS
+            if infer_roi:
+                # Get the predicted ROI
+                roi_center = get_max_preds(heatmap_ds_pred.cpu().numpy())[0][:, 0, :]
+                roi_center = torch.FloatTensor(roi_center)
+                roi_center *= ds_factor
+                roi_center = roi_center.cuda(non_blocking=True)
+                input_roi = crop_and_resize(input, roi_center, region_size)
+                meta.update(
+                    {'roi_center': roi_center.cpu(),
+                     'input_roi': input_roi.cpu()
+                     })
+            else:
+                assert 'roi_center' in meta.keys()
+                roi_center = meta['roi_center'].cuda(non_blocking=True)
 
-        if self.cfg.TRAIN.EFF_NET:
-            # TODO -- xiaofeng change for efficient Net
-            # resize to 3x224x224, changre REGION_RADIUS from 128 to 112
-            # batch = cv2.resize(input_roi, dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-            batch = input_roi
-            MOD = 0
-            B0 = batch.shape[0]
-            B, C, H, W = batch.shape
+            if self.cfg.TRAIN.EFF_NET:
+                # TODO -- xiaofeng change for efficient Net
+                # resize to 3x224x224, changre REGION_RADIUS from 128 to 112
+                # batch = cv2.resize(input_roi, dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
+                batch = input_roi
+                MOD = 0
+                B0 = batch.shape[0]
+                B, C, H, W = batch.shape
 
-            with torch.no_grad():
-                # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
-                nonzero_mask = self.get_mask(batch)
+                with torch.no_grad():
+                    # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
+                    nonzero_mask = self.get_mask(batch)
 
-            if self.backbone_type.startswith('resnet'):
-                batch_base_feats = self.backbone.ext_features(batch)
-            elif self.backbone_type.startswith('eff'):
-                feats_dict = self.backbone.extract_endpoints(batch)
-                #                       [40, 16, 128, 128],        [40, 24, 64, 64]
-                batch_base_feats = (feats_dict['reduction_1'], feats_dict['reduction_2'], \
-                                    #                       [40, 40, 32, 32],          [40, 112, 16, 16],       [40, 1280, 8, 8]
-                                    feats_dict['reduction_3'], feats_dict['reduction_4'], feats_dict['reduction_5'])
+                if self.backbone_type.startswith('resnet'):
+                    batch_base_feats = self.backbone.ext_features(batch)
+                elif self.backbone_type.startswith('eff'):
+                    feats_dict = self.backbone.extract_endpoints(batch)
+                    #                       [40, 16, 128, 128],        [40, 24, 64, 64]
+                    batch_base_feats = (feats_dict['reduction_1'], feats_dict['reduction_2'], \
+                                        #                       [40, 40, 32, 32],          [40, 112, 16, 16],       [40, 1280, 8, 8]
+                                        feats_dict['reduction_3'], feats_dict['reduction_4'], feats_dict['reduction_5'])
 
 
-            # vfeat_fpn: [B (B0*MOD), 3920, 256] / vfeat_fpn.shape = torch.Size([4, 784, 1792])
-            vfeat_fpn, vmask, H2, W2 = self.in_fpn_forward(batch_base_feats, nonzero_mask, B)
+                # vfeat_fpn: [B (B0*MOD), 3920, 256] / vfeat_fpn.shape = torch.Size([4, 784, 1792])
+                vfeat_fpn, vmask, H2, W2 = self.in_fpn_forward(batch_base_feats, nonzero_mask, B)
 
-            # if self.in_fpn_layers == '234', xy_shape = (28, 28)
-            # if self.in_fpn_layers == '34',  xy_shape = (14, 14)
-            xy_shape = torch.Size((H2, W2))
-            # xy_indices: [14, 14, 20, 3]
-            xy_indices = get_all_indices(xy_shape)
-            scale_H = H // H2
-            scale_W = W // W2
+                # if self.in_fpn_layers == '234', xy_shape = (28, 28)
+                # if self.in_fpn_layers == '34',  xy_shape = (14, 14)
+                xy_shape = torch.Size((H2, W2))
+                # xy_indices: [14, 14, 20, 3]
+                xy_indices = get_all_indices(xy_shape)
+                scale_H = H // H2
+                scale_W = W // W2
 
-            # Has to be exactly divided.
-            if (scale_H * H2 != H) or (scale_W * W2 != W):
-                import pdb
-                pdb.set_trace()
+                # Has to be exactly divided.
+                if (scale_H * H2 != H) or (scale_W * W2 != W):
+                    import pdb
+                    pdb.set_trace()
 
-            scale = torch.tensor([[scale_H, scale_W]], device='cuda')
+                scale = torch.tensor([[scale_H, scale_W]], device='cuda')
 
-            # TODO
-            vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
-            # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
-            # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+                # TODO
+                vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
+                # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
+                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
 
-            # curr_feat:            XF: 3: [4, 160, 28, 28]
-            # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
-            # curr_feat = batch_base_feats[3]
-            # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
-            #                                                               size=curr_feat.shape[2:],
-            #                                                               mode=self.fpn_interp_mode,
-            #                                                               align_corners=self.align_corners)
+                # curr_feat:            XF: 3: [4, 160, 28, 28]
+                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
+                # curr_feat = batch_base_feats[3]
+                # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
+                #                                                               size=curr_feat.shape[2:],
+                #                                                               mode=self.fpn_interp_mode,
+                #                                                               align_corners=self.align_corners)
 
-            # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
-            trans_scores_small = self.out_conv(vfeat_fused_fpn)
+                # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
+                trans_scores_small = self.out_conv(vfeat_fused_fpn)
 
-            out_size = [int(H * self.output_scaleup), int(W * self.output_scaleup)]
-            # full_scores: [B0, 2, 112, 112] / XF: trans_scores_up = [B, 1, 224, 224]
-            trans_scores_up = F.interpolate(trans_scores_small, size=out_size,
-                                            mode='bilinear', align_corners=False)
-            # import pdb
-            # pdb.set_trace()
-            heatmap_roi_pred = trans_scores_up
-            # xiaofeng: try to generate feat for regression task for fun
-            roi_feats = self.relu(self.roi_gn(vfeat_fused_fpn))
-
-        else:
-            # (batch, 16, 256, 256)
-            # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
-            if self.cfg.TRAIN.ROI_CLAHE:
-                B, C, H, W = input_roi.shape
-                # xiaofeng add for test
+                out_size = [int(H * self.output_scaleup), int(W * self.output_scaleup)]
+                # full_scores: [B0, 2, 112, 112] / XF: trans_scores_up = [B, 1, 224, 224]
+                trans_scores_up = F.interpolate(trans_scores_small, size=out_size,
+                                                mode='bilinear', align_corners=False)
                 # import pdb
                 # pdb.set_trace()
-                data_numpy = copy.deepcopy(input_roi)
-                data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
-                for i in range(B):
-                    img = data_numpy.numpy()[i,:,:,:].astype('uint8')
-                    # print("clahe: ", img.shape)
-                    b, g, r = cv2.split(img)
-                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-                    b = clahe.apply(b)
-                    g = clahe.apply(g)
-                    r = clahe.apply(r)
-                    img = cv2.merge([b, g, r])
-                    data_numpy[i,:,:,:] = torch.from_numpy(img)
-                    # print("after clahe: ", img.shape)
-                data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
+                heatmap_roi_pred = trans_scores_up
+                # xiaofeng: try to generate feat for regression task for fun
+                roi_feats = self.relu(self.roi_gn(vfeat_fused_fpn))
 
-                roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
             else:
-                roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+                # (batch, 16, 256, 256)
+                # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
+                if self.cfg.TRAIN.ROI_CLAHE:
+                    B, C, H, W = input_roi.shape
+                    # xiaofeng add for test
+                    # import pdb
+                    # pdb.set_trace()
+                    data_numpy = copy.deepcopy(input_roi)
+                    data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
+                    for i in range(B):
+                        img = data_numpy.numpy()[i,:,:,:].astype('uint8')
+                        # print("clahe: ", img.shape)
+                        b, g, r = cv2.split(img)
+                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                        b = clahe.apply(b)
+                        g = clahe.apply(g)
+                        r = clahe.apply(r)
+                        img = cv2.merge([b, g, r])
+                        data_numpy[i,:,:,:] = torch.from_numpy(img)
+                        # print("after clahe: ", img.shape)
+                    data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
 
-            roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
-            # xiaofeng add for k=1 layer for ROI
-            roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
-            roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
+                    roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+                else:
+                    roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
 
-            # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
-            roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
+                roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+                # xiaofeng add for k=1 layer for ROI
+                roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+                roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
 
-            # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
-            roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
-            roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
-            # 32 channel --> 1 channel  (batch, 1, 256, 256)
-            heatmap_roi_pred = self.heatmap_roi(roi_feats)
+                # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
+                roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
 
-        if infer_roi:
-            # Get initial location from heatmap
-            loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
-            loc_pred_init = torch.FloatTensor(loc_pred_init).cuda(non_blocking=True)
-            meta.update({'pixel_in_roi': loc_pred_init.cpu()})
-        else:
-            loc_pred_init = meta['pixel_in_roi'].cuda(non_blocking=True)
+                # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
+                roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
+                roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+                # 32 channel --> 1 channel  (batch, 1, 256, 256)
+                heatmap_roi_pred = self.heatmap_roi(roi_feats)
 
-        # roi_feats: (batch, 32, 256, 256) --> (batch, 32, 1, 1)
-        loc_init_feat = crop_and_resize(roi_feats, loc_pred_init, output_size=1)
-        # (batch, 32, 1, 1) --> (batch, 32) / [B, 1792, 1, 1] --> [B, 1792]
-        loc_init_feat = loc_init_feat[:, :, 0, 0]
-        if self.cfg.TRAIN.EFF_NET:
-            # (batch, 1792) --> (batch, 2)
-            offset_in_roi_pred = self.eff_regress(loc_init_feat)
-        else:
-            # (batch, 32) --> (batch, 2)
-            offset_in_roi_pred = self.regress(loc_init_feat)
+            if infer_roi:
+                # Get initial location from heatmap
+                loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
+                loc_pred_init = torch.FloatTensor(loc_pred_init).cuda(non_blocking=True)
+                meta.update({'pixel_in_roi': loc_pred_init.cpu()})
+            else:
+                loc_pred_init = meta['pixel_in_roi'].cuda(non_blocking=True)
+
+            # roi_feats: (batch, 32, 256, 256) --> (batch, 32, 1, 1)
+            loc_init_feat = crop_and_resize(roi_feats, loc_pred_init, output_size=1)
+            # (batch, 32, 1, 1) --> (batch, 32) / [B, 1792, 1, 1] --> [B, 1792]
+            loc_init_feat = loc_init_feat[:, :, 0, 0]
+            if self.cfg.TRAIN.EFF_NET:
+                # (batch, 1792) --> (batch, 2)
+                offset_in_roi_pred = self.eff_regress(loc_init_feat)
+            else:
+                # (batch, 32) --> (batch, 2)
+                offset_in_roi_pred = self.regress(loc_init_feat)
 
         return heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta
 

@@ -119,6 +119,7 @@ TRAIN:
   NESTEROV: false
   FULL_DATA: false
   EFF_NET: false
+  HRNET_ONLY: false
   DATA_CLAHE: false
   ROI_CLAHE: false
 TEST:

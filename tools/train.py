@@ -123,7 +123,8 @@ def main():
     criterion = HybridLoss(
         roi_weight=cfg.LOSS.ROI_WEIGHT,
         regress_weight=cfg.LOSS.REGRESS_WEIGHT,
-        use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT).cuda()
+        use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT,
+        hrnet_only=cfg.TRAIN.HRNET_ONLY).cuda()
 
     # Data loading code
     # normalize = transforms.Normalize(
@@ -352,13 +353,16 @@ def main():
 
             print("saving spent time:")
             end_time = timer(val_time)  # timing ends here for "start_time" variable
-        elif (epoch % 100 == 0) and (epoch != 0):
+        elif (epoch % 60 == 0) and (epoch != 0):
             logger.info('=> saving epoch {} checkpoint to {}'.format(epoch, final_output_dir))
             # transfer the model to CPU before saving to fix unstable bug:
             # github.com/pytorch/pytorch/issues/10577
 
             time_str = time.strftime('%Y-%m-%d-%H-%M')
-            tmp_checkpoint_name = 'checkpoint_epoch%d_%s.pth' % (epoch, time_str)
+            if cfg.TRAIN.HRNET_ONLY:
+                checkpoint_filename = 'checkpoint_HRNET_epoch%d_%s.pth' % (epoch, time_str)
+            else:
+                checkpoint_filename = 'checkpoint_Hybrid_epoch%d_%s.pth' % (epoch, time_str)
             model = model.cpu()
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -367,12 +371,16 @@ def main():
                 'best_state_dict': model.module.state_dict(),
                 'metric': final_metric,
                 'optimizer': optimizer.state_dict(),
-            }, best_model, final_output_dir, tmp_checkpoint_name)
+            }, best_model, final_output_dir, checkpoint_filename)
             model = model.cuda()
 
     # xiaofeng change
     time_str = time.strftime('%Y-%m-%d-%H-%M')
-    model_name = 'final_state_%s.pth' % (time_str)
+    if cfg.TRAIN.HRNET_ONLY:
+        model_name = 'final_state_HRNET_%s.pth' % (time_str)
+    else:
+        model_name = 'final_state_Hybrid_%s.pth' % (time_str)
+
     final_model_state_file = os.path.join(final_output_dir, model_name)
     logger.info('=> saving final model state to {}'.format(final_model_state_file))
     torch.save(model.module.state_dict(), final_model_state_file)
@@ -388,7 +396,7 @@ def main():
         'metric': final_metric,
         'optimizer': optimizer.state_dict(),
     }, best_model, final_output_dir, "checkpoint_final_state.pth")
-    model = model.cuda()
+    # model = model.cuda()
 
 
 if __name__ == '__main__':

@@ -121,22 +121,6 @@ def save_debug_images(config,
     if not config.DEBUG.DEBUG:
         return
 
-    if config.DEBUG.SAVE_HEATMAP_DS_GT and heatmap_ds is not None:
-        save_batch_heatmaps(
-            input, heatmap_ds, '{}_hm_ds_gt.jpg'.format(prefix)
-        )
-    if config.DEBUG.SAVE_HEATMAP_DS_PRED:
-        save_batch_heatmaps(
-            input, heatmap_ds_pred, '{}_hm_pred.jpg'.format(prefix)
-        )
-    if config.DEBUG.SAVE_HEATMAP_ROI_GT and heatmap_roi is not None:
-        save_batch_heatmaps(
-            input_roi, heatmap_roi, '{}_hm_roi_gt.jpg'.format(prefix)
-        )
-    if config.DEBUG.SAVE_HEATMAP_ROI_PRED:
-        save_batch_heatmaps(
-            input_roi, heatmap_roi_pred, '{}_hm_roi_pred.jpg'.format(prefix)
-        )
     if config.DEBUG.SAVE_FOVEA_FINAL_GT:
         save_batch_image_with_fovea(
             input, meta['fovea'], '{}_fovea_gt.jpg'.format(prefix),
@@ -145,16 +129,35 @@ def save_debug_images(config,
         save_batch_image_with_fovea(
             input, fovea_final_pred, '{}_fovea_final_pred.jpg'.format(prefix),
         )
-    if config.DEBUG.SAVE_FOVEA_ROI_GT and heatmap_roi is not None:
-        save_batch_image_with_fovea(
-            input_roi, meta['fovea_in_roi'], '{}_fovea_roi_gt.jpg'.format(prefix)
+    if config.DEBUG.SAVE_HEATMAP_DS_GT and heatmap_ds is not None:
+        save_batch_heatmaps(
+            input, heatmap_ds, '{}_hm_ds_gt.jpg'.format(prefix)
         )
-    if config.DEBUG.SAVE_FOVEA_ROI_INIT_PRED:
-        save_batch_image_with_fovea(
-            input_roi, fovea_roi_init_pred, '{}_fovea_roi_init_pred.jpg'.format(prefix)
+    if config.DEBUG.SAVE_HEATMAP_DS_PRED:
+        save_batch_heatmaps(
+            input, heatmap_ds_pred, '{}_hm_pred.jpg'.format(prefix)
         )
-    if config.DEBUG.SAVE_FOVEA_ROI_FINAL_PRED:
-        save_batch_image_with_fovea(
-            input_roi, fovea_roi_final_pred, '{}_fovea_roi_final_pred.jpg'.format(prefix)
-        )
+
+    # HRNET has not ROI heatmap and region
+    if not config.TRAIN.HRNET_ONLY:
+        if config.DEBUG.SAVE_HEATMAP_ROI_GT and heatmap_roi is not None:
+            save_batch_heatmaps(
+                input_roi, heatmap_roi, '{}_hm_roi_gt.jpg'.format(prefix)
+            )
+        if config.DEBUG.SAVE_HEATMAP_ROI_PRED:
+            save_batch_heatmaps(
+                input_roi, heatmap_roi_pred, '{}_hm_roi_pred.jpg'.format(prefix)
+            )
+        if config.DEBUG.SAVE_FOVEA_ROI_GT and heatmap_roi is not None:
+            save_batch_image_with_fovea(
+                input_roi, meta['fovea_in_roi'], '{}_fovea_roi_gt.jpg'.format(prefix)
+            )
+        if config.DEBUG.SAVE_FOVEA_ROI_INIT_PRED:
+            save_batch_image_with_fovea(
+                input_roi, fovea_roi_init_pred, '{}_fovea_roi_init_pred.jpg'.format(prefix)
+            )
+        if config.DEBUG.SAVE_FOVEA_ROI_FINAL_PRED:
+            save_batch_image_with_fovea(
+                input_roi, fovea_roi_final_pred, '{}_fovea_roi_final_pred.jpg'.format(prefix)
+            )
 

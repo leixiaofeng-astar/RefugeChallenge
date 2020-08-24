@@ -181,9 +181,6 @@ class FoveaDataset(Dataset):
                                                      (pw, self.image_size[0]-nw-pw), (0, 0)), mode='constant')
                     fovea[0] += pw
                     fovea[1] += ph
-        #test
-        # print("scaling")
-        # tmp_time = timer(tmp_time)
 
         image_size = self.image_size
         # crop image from center
@@ -300,17 +297,16 @@ class FoveaDataset(Dataset):
             return input, meta
 
 
-
     def generate_target(self, image, fovea):
         assert self.target_type == 'gaussian', \
             'Only support gaussian map now!'
 
         if self.target_type == 'gaussian':
             if self.is_train:
-                image_size = self.patch_size
+                image_size = self.patch_size   # 1024
                 image_ds_size = self.patch_size / self.ds_factor
             else:
-                image_size = self.crop_size
+                image_size = self.crop_size    # 1536
                 image_ds_size = self.crop_size / self.ds_factor
             image_size = image_size.astype(np.int32)
             image_ds_size = image_ds_size.astype(np.int32)
@@ -375,7 +371,7 @@ class FoveaDataset(Dataset):
             oy = np.random.rand() * offset
             cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_size[0] - 1)
             cy = np.clip(sign_y * oy + fovea[1] / feat_stride[1], 0, image_size[1] - 1)
-            cx = (cx * feat_stride[0]).astype(np.int32)
+            cx = (cx * feat_stride[0]).astype(np.int32)   # cx scale to original image size
             cy = (cy * feat_stride[1]).astype(np.int32)
 
             # get fovea location in this ROI

@@ -15,7 +15,6 @@ from core.evaluate import calc_batch_l2_dist
 from core.inference import get_final_preds
 from utils.transforms import flip_torch
 from utils.vis import save_debug_images
-from utils.utils import save_checkpoint
 
 
 logger = logging.getLogger(__name__)

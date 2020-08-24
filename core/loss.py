@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class HeatmapMSELoss(nn.Module):
@@ -34,24 +35,33 @@ class HeatmapMSELoss(nn.Module):
 
 
 class HybridLoss(nn.Module):
-    def __init__(self, roi_weight, regress_weight, use_target_weight):
+    def __init__(self, roi_weight, regress_weight, use_target_weight, hrnet_only=False):
         super(HybridLoss, self).__init__()
         self.heatmap_mse = HeatmapMSELoss(use_target_weight)
         self.smooth_l1 = nn.SmoothL1Loss(size_average=True, reduce=True)
         self.roi_weight = roi_weight
         self.regress_weight = regress_weight
+        self.hrnet_only = hrnet_only
 
     def forward(self, pred_ds, target_ds, pred_roi, target_roi, pred_offset, target_offset, target_weight):
         heatmap_ds_loss = self.heatmap_mse(pred_ds, target_ds, target_weight)
-        heatmap_roi_loss = self.heatmap_mse(pred_roi, target_roi, target_weight)
+        if self.hrnet_only:
+            B = pred_roi.shape[0]
+            heatmap_roi_loss = torch.zeros(1, dtype=torch.float)
+            # np.zeros((B, 1), dtype=np.float32)
+            regress_loss = torch.zeros(1, dtype=torch.float)
+            hybrid_loss = heatmap_ds_loss
+        else:
+            heatmap_roi_loss = self.heatmap_mse(pred_roi, target_roi, target_weight)
 
-        pred_offset = pred_offset.mul(target_weight)
-        target_offset = target_offset.mul(target_weight)
-        regress_loss = self.smooth_l1(pred_offset, target_offset)
+            pred_offset = pred_offset.mul(target_weight)
+            target_offset = target_offset.mul(target_weight)
+            regress_loss = self.smooth_l1(pred_offset, target_offset)
 
-        heatmap_roi_loss = heatmap_roi_loss * self.roi_weight
-        regress_loss = regress_loss * self.regress_weight
-        hybrid_loss = heatmap_ds_loss + heatmap_roi_loss + regress_loss
+            heatmap_roi_loss = heatmap_roi_loss * self.roi_weight
+            regress_loss = regress_loss * self.regress_weight
+
+            hybrid_loss = heatmap_ds_loss + heatmap_roi_loss + regress_loss
 
         return hybrid_loss, {'heatmap_ds': heatmap_ds_loss,
                              'heatmap_roi': heatmap_roi_loss,
