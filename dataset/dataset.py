@@ -57,6 +57,19 @@ common_aug_func = iaa.Sequential(
     iaa.Grayscale(alpha=0.5)
 ])
 
+def create_circular_mask(h, w, center=None, radius=None):
+    if center is None: # use the middle of the image
+        center = [int(w/2), int(h/2)]
+    if radius is None: # use the smallest distance between the center and image walls
+        radius = min(center[0], center[1], w-center[0], h-center[1])
+
+    Y, X = np.ogrid[:h, :w]
+    dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+
+    mask = dist_from_center <= radius
+    return mask
+
+
 class FoveaDataset(Dataset):
     def __init__(self, cfg, root, image_set, is_train, transform=None):
         self.is_train = is_train
@@ -81,6 +94,7 @@ class FoveaDataset(Dataset):
         self.max_offset = cfg.MODEL.MAX_OFFSET
         self.region_radius = cfg.MODEL.REGION_RADIUS
         self.clahe_enaled = cfg.TRAIN.DATA_CLAHE
+        self.mv_idea = cfg.TRAIN.MV_IDEA
 
         self.transform = transform
         self.db = []
@@ -388,7 +402,10 @@ class FoveaDataset(Dataset):
             target_weight = np.array([1.], np.float32)
 
             # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
-            tmp_size = self.sigma_roi * 3
+            if self.mv_idea:
+                tmp_size = self.sigma_roi * 6
+            else:
+                tmp_size = self.sigma_roi * 3
 
             mu_x = int(fovea_in_roi[0] + 0.5)
             mu_y = int(fovea_in_roi[1] + 0.5)
@@ -418,7 +435,16 @@ class FoveaDataset(Dataset):
             y = x[:, np.newaxis]
             x0 = y0 = size // 2
             # The gaussian is not normalized, we want the center value to equal 1
-            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
+            # xiaofeng add: mv processing is for ROI region only
+            # https://stackoverflow.com/questions/44865023/how-can-i-create-a-circular-mask-for-a-numpy-array
+            if self.mv_idea:
+                # create a circle
+                g = np.ones((size, size), np.uint8)
+                mask = create_circular_mask(size, size)
+                g[mask] = 1
+                g[~mask] = 0
+            else:
+                g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
 
             # Usable gaussian range
             g_x = max(0, -ul[0]), min(br[0], region_size) - ul[0]

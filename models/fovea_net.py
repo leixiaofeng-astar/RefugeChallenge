@@ -545,15 +545,13 @@ class FoveaNet(nn.Module):
         #                        bias=False)
         # self.bn3 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # self.relu = nn.ReLU(inplace=True)
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
-                              bias=False)
-        self.conv1_1 = nn.Conv2d(3, 64, kernel_size=1, bias=False)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
-        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1,
-                               bias=False)
+        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # xf add it
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn3 = nn.BatchNorm2d(64)
 
         self.relu = nn.ReLU(inplace=True)
@@ -1002,13 +1000,22 @@ class FoveaNet(nn.Module):
                         # print("after clahe: ", img.shape)
                     data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
 
-                    roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+                    if self.cfg.TRAIN.MV_IDEA:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+                    else:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
                 else:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+                    if self.cfg.TRAIN.MV_IDEA:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
+                    else:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+
 
                 roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
-                # xiaofeng add for k=1 layer for ROI
-                roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+                # xiaofeng add for k=3 layer for ROI
+                if self.cfg.TRAIN.MV_IDEA:
+                    roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+
                 roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
 
                 # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)

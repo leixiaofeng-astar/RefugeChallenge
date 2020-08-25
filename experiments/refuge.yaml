@@ -122,6 +122,7 @@ TRAIN:
   HRNET_ONLY: false
   DATA_CLAHE: false
   ROI_CLAHE: false
+  MV_IDEA: false
 TEST:
   BATCH_SIZE_PER_GPU: 4
   FLIP_TEST: true
