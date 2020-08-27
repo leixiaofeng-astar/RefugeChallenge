@@ -13,7 +13,7 @@ import cv2
 import copy
 import numpy as np
 
-from core.inference import get_max_preds
+from core.inference import get_max_preds, get_heatmap_center_preds
 from utils.transforms import crop_and_resize
 from efficientnet.model import EfficientNet
 
@@ -545,6 +545,7 @@ class FoveaNet(nn.Module):
         #                        bias=False)
         # self.bn3 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # self.relu = nn.ReLU(inplace=True)
+        self.orig_stemnet = False
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
         self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
@@ -1001,12 +1002,18 @@ class FoveaNet(nn.Module):
                     data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
 
                     if self.cfg.TRAIN.MV_IDEA:
-                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+                        if self.orig_stemnet:
+                            roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
+                        else:
+                            roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
                     else:
                         roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
                 else:
                     if self.cfg.TRAIN.MV_IDEA:
-                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
+                        if self.orig_stemnet:
+                            roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))
+                        else:
+                            roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
                     else:
                         roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
 
@@ -1014,7 +1021,8 @@ class FoveaNet(nn.Module):
                 roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
                 # xiaofeng add for k=3 layer for ROI
                 if self.cfg.TRAIN.MV_IDEA:
-                    roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+                    if not self.orig_stemnet:
+                        roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
 
                 roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
 
@@ -1029,7 +1037,11 @@ class FoveaNet(nn.Module):
 
             if infer_roi:
                 # Get initial location from heatmap
-                loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
+                if self.cfg.TRAIN.MV_IDEA:
+                    loc_pred_init = get_heatmap_center_preds(heatmap_roi_pred.cpu().numpy())[:, 0, :]
+                else:
+                    loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
+
                 loc_pred_init = torch.FloatTensor(loc_pred_init).cuda(non_blocking=True)
                 meta.update({'pixel_in_roi': loc_pred_init.cpu()})
             else:

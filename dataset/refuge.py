@@ -83,7 +83,11 @@ class Dataset(FoveaDataset):
             return train_db
         elif image_set == 'test':
             # test images and labels
-            test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+            make_sample_gt = False
+            if make_sample_gt:
+                test_anno_filename = os.path.join(self.root, 'test-GT', 'test_Fovea_locations.xlsx')
+            else:
+                test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
             workbook = load_workbook(test_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -95,7 +99,10 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=4).value) - 1
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                if make_sample_gt:
+                    image_file = os.path.join(self.root, 'test_img', fname)
+                else:
+                    image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)

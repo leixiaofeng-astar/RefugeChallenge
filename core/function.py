@@ -243,7 +243,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             sum_db += 1
             lr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_lr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir='./')
             lr_init_avg_l2_dist += lr_tmp_avg_l2_dist
-            hr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_hr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=None)
+            hr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_hr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir='./log')
             hr_init_avg_l2_dist += hr_tmp_avg_l2_dist
             final_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_final_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=output_dir)
             final_avg_l2_dist += final_tmp_avg_l2_dist
@@ -256,7 +256,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
         final_avg_l2_dist /= sum_db
     else:
         lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir='./')
-        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir=None)
+        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir='./log')
         final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
 
     logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(

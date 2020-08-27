@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from utils.transforms import transform_preds
 
-
+global_img_idx = 0
 def get_max_preds(batch_heatmaps):
     '''
     get predictions from score maps
@@ -49,6 +49,7 @@ def get_heatmap_center_preds(batch_heatmaps):
     get predictions from score maps
     heatmaps: numpy.ndarray([batch_size, 1, height, width])
     '''
+    global global_img_idx
     assert isinstance(batch_heatmaps, np.ndarray), \
         'batch_heatmaps should be numpy.ndarray'
     assert batch_heatmaps.ndim == 4, 'batch_images should be 4-ndim'
@@ -72,6 +73,8 @@ def get_heatmap_center_preds(batch_heatmaps):
         img = np.uint8( batch_heatmaps[idx, :, :, :] * 255)
         img = cv2.medianBlur(img, 5)
         cimg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        # param1：使用HOUGH_GRADIENT方法检测圆形时，传递给Canny边缘检测器的两个阈值的较大值。
+        # param2：使用HOUGH_GRADIENT方法检测圆形时，检测圆形的累加器阈值，阈值越大检测的圆形越精确
         # https://blog.csdn.net/weixin_42904405/article/details/82814768
         # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghcircles/py_houghcircles.html
         circles = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, 1, 20,
@@ -79,6 +82,7 @@ def get_heatmap_center_preds(batch_heatmaps):
         max_rad = 0.0
         # import pdb
         # pdb.set_trace()
+        global_img_idx += 1
         if circles is not None:
             for i in circles[0, :]:
                 # get the maximum outer circle
@@ -88,11 +92,12 @@ def get_heatmap_center_preds(batch_heatmaps):
                     preds[idx, 0, 0] = i[0]
                     preds[idx, 0, 1] = i[1]
 
-            #     cv2.circle(cimg, (i[0], i[1]), i[2], (0, 255, 0), 2)
-            #     cv2.circle(cimg, (i[0], i[1]), 2, (0, 0, 255), 3)
-            #
-            # tmp_filename = "test_roi_heatmap_%d.png" %(idx)
-            # cv2.imwrite(tmp_filename, cimg)
+                # cv2.circle(cimg, (i[0], i[1]), int(i[2]), (0, 255, 0), 2)
+                # cv2.circle(cimg, (i[0], i[1]), 2, (0, 0, 255), 3)
+
+                # print("MV heatmap %d: center: (%d, %d), current_rad: %.02f" %(global_img_idx%400, i[0], i[1], current_rad))
+            # roi_heatmap_file = "test_roi_heatmap_%d_%d_%d.png" %(global_img_idx%400, i[0], i[1])
+            # cv2.imwrite(roi_heatmap_file, cimg)
 
     return preds
 

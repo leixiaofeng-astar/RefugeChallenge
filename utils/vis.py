@@ -9,7 +9,7 @@ import torchvision
 import torch.nn.functional as F
 import cv2
 
-from core.inference import get_max_preds
+from core.inference import get_max_preds, get_heatmap_center_preds
 
 
 def save_batch_image_with_fovea(batch_image, batch_fovea, file_name, nrow=8, padding=2, ds_factor=1):
@@ -52,7 +52,7 @@ def save_batch_image_with_fovea(batch_image, batch_fovea, file_name, nrow=8, pad
 
 
 def save_batch_heatmaps(batch_image, batch_heatmaps, file_name,
-                        normalize=True):
+                        normalize=True, MV_IDEA=False):
     # visualize only the first sample
     batch_image = batch_image[:1, :, :, :]
     batch_heatmaps = batch_heatmaps[:1, :]
@@ -74,7 +74,10 @@ def save_batch_heatmaps(batch_image, batch_heatmaps, file_name,
                            3),
                           dtype=np.uint8)
 
-    preds, maxvals = get_max_preds(batch_heatmaps.detach().cpu().numpy())
+    if MV_IDEA:
+        preds = get_heatmap_center_preds(batch_heatmaps.detach().cpu().numpy())
+    else:
+        preds, maxvals = get_max_preds(batch_heatmaps.detach().cpu().numpy())
 
     for i in range(batch_size):
         image = batch_image[i].mul(255)\
@@ -140,13 +143,17 @@ def save_debug_images(config,
 
     # HRNET has not ROI heatmap and region
     if not config.TRAIN.HRNET_ONLY:
+        if config.TRAIN.MV_IDEA:
+            MV_Center = True
+        else:
+            MV_Center = False
         if config.DEBUG.SAVE_HEATMAP_ROI_GT and heatmap_roi is not None:
             save_batch_heatmaps(
-                input_roi, heatmap_roi, '{}_hm_roi_gt.jpg'.format(prefix)
+                input_roi, heatmap_roi, '{}_hm_roi_gt.jpg'.format(prefix), MV_IDEA=MV_Center
             )
         if config.DEBUG.SAVE_HEATMAP_ROI_PRED:
             save_batch_heatmaps(
-                input_roi, heatmap_roi_pred, '{}_hm_roi_pred.jpg'.format(prefix)
+                input_roi, heatmap_roi_pred, '{}_hm_roi_pred.jpg'.format(prefix), MV_IDEA=MV_Center
             )
         if config.DEBUG.SAVE_FOVEA_ROI_GT and heatmap_roi is not None:
             save_batch_image_with_fovea(

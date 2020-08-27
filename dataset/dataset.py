@@ -57,18 +57,6 @@ common_aug_func = iaa.Sequential(
     iaa.Grayscale(alpha=0.5)
 ])
 
-def create_circular_mask(h, w, center=None, radius=None):
-    if center is None: # use the middle of the image
-        center = [int(w/2), int(h/2)]
-    if radius is None: # use the smallest distance between the center and image walls
-        radius = min(center[0], center[1], w-center[0], h-center[1])
-
-    Y, X = np.ogrid[:h, :w]
-    dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
-
-    mask = dist_from_center <= radius
-    return mask
-
 
 class FoveaDataset(Dataset):
     def __init__(self, cfg, root, image_set, is_train, transform=None):
@@ -95,12 +83,30 @@ class FoveaDataset(Dataset):
         self.region_radius = cfg.MODEL.REGION_RADIUS
         self.clahe_enaled = cfg.TRAIN.DATA_CLAHE
         self.mv_idea = cfg.TRAIN.MV_IDEA
+        self.mv_idea_hm1 = cfg.TRAIN.MV_IDEA_HM1
 
         self.transform = transform
         self.db = []
 
     def evaluate(self, preds, output_dir):
         raise NotImplementedError
+
+    def create_circular_mask(self, h, w, center=None, radius=None):
+        if center is None:  # use the middle of the image
+            center = [int(w / 2), int(h / 2)]
+        if radius is None:  # use the smallest distance between the center and image walls
+            radius = min(center[0], center[1], w - center[0], h - center[1])
+
+        Y, X = np.ogrid[:h, :w]
+        dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2)
+
+        if self.mv_idea_hm1:
+            # xiaofeng changed it -- use a continuous gray level change circle, center = 0
+            dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2) / radius
+            return dist_from_center
+        else:
+            mask = dist_from_center <= radius
+            return mask
 
     def _get_db(self,):
         raise NotImplementedError
@@ -395,10 +401,22 @@ class FoveaDataset(Dataset):
 
             # Re-apply the target generation process
             image_size = np.array([region_size, region_size], np.int32)
-            heatmap_roi = np.zeros((1,
-                                   region_size,
-                                   region_size),
-                                   dtype=np.float32)
+            if self.mv_idea:
+                if self.mv_idea_hm1:
+                    heatmap_roi = np.ones((1,
+                                            region_size,
+                                            region_size),
+                                           dtype=np.float32)
+                else:
+                    heatmap_roi = np.zeros((1,
+                                            region_size,
+                                            region_size),
+                                           dtype=np.float32)
+            else:
+                heatmap_roi = np.zeros((1,
+                                       region_size,
+                                       region_size),
+                                       dtype=np.float32)
             target_weight = np.array([1.], np.float32)
 
             # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
@@ -439,10 +457,16 @@ class FoveaDataset(Dataset):
             # https://stackoverflow.com/questions/44865023/how-can-i-create-a-circular-mask-for-a-numpy-array
             if self.mv_idea:
                 # create a circle
-                g = np.ones((size, size), np.uint8)
-                mask = create_circular_mask(size, size)
-                g[mask] = 1
-                g[~mask] = 0
+                if self.mv_idea_hm1:
+                    # method 2 -- set the center point 0 -- black
+                    g = self.create_circular_mask(size, size)
+                else:
+                # set the center point 0
+                    g = np.ones((size, size), np.uint8)
+                    mask = self.create_circular_mask(size, size)
+                    g[mask] = 1
+                    g[~mask] = 0
+
             else:
                 g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
 
