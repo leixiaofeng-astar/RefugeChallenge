@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 from utils.transforms import transform_preds
 
-global_img_idx = 0
 def get_max_preds(batch_heatmaps):
     '''
     get predictions from score maps
@@ -44,12 +43,13 @@ def get_max_preds(batch_heatmaps):
     return preds, maxvals
 
 # xiaofeng add for MV processing to get circle
-def get_heatmap_center_preds(batch_heatmaps):
+tmp_img_idx = 0
+def get_heatmap_center_preds(batch_heatmaps, debug=False):
+    global tmp_img_idx
     '''
     get predictions from score maps
     heatmaps: numpy.ndarray([batch_size, 1, height, width])
     '''
-    global global_img_idx
     assert isinstance(batch_heatmaps, np.ndarray), \
         'batch_heatmaps should be numpy.ndarray'
     assert batch_heatmaps.ndim == 4, 'batch_images should be 4-ndim'
@@ -63,6 +63,7 @@ def get_heatmap_center_preds(batch_heatmaps):
     preds = np.zeros((batch_size, 1, 2), dtype = int)
 
     for idx in range(batch_size):
+        tmp_img_idx += 1
         center_x = width // 2
         center_y = height // 2
         preds[idx, 0, 0] = center_x
@@ -71,40 +72,49 @@ def get_heatmap_center_preds(batch_heatmaps):
         # handle it as one image
         batch_heatmaps[batch_heatmaps < 0] = 0
         img = np.uint8( batch_heatmaps[idx, :, :, :] * 255)
-        img = cv2.medianBlur(img, 5)
+        img = cv2.medianBlur(img, 7)
         cimg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         # param1：使用HOUGH_GRADIENT方法检测圆形时，传递给Canny边缘检测器的两个阈值的较大值。
         # param2：使用HOUGH_GRADIENT方法检测圆形时，检测圆形的累加器阈值，阈值越大检测的圆形越精确
         # https://blog.csdn.net/weixin_42904405/article/details/82814768
         # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghcircles/py_houghcircles.html
         circles = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, 1, 20,
-                                   param1=50, param2=30, minRadius=10, maxRadius=30)
+                                   param1=30, param2=30, minRadius=18, maxRadius=50)
         max_rad = 0.0
         # import pdb
         # pdb.set_trace()
-        global_img_idx += 1
         if circles is not None:
+            sub_idx = 0
+            preds[idx, 0, 0] = 0
+            preds[idx, 0, 1] = 0
             for i in circles[0, :]:
+                sub_idx += 1
                 # get the maximum outer circle
                 current_rad = i[2]
                 if current_rad > max_rad:
                     max_rad = current_rad
-                    preds[idx, 0, 0] = i[0]
-                    preds[idx, 0, 1] = i[1]
+                    preds[idx, 0, 0] += i[0]
+                    preds[idx, 0, 1] += i[1]
 
-                # cv2.circle(cimg, (i[0], i[1]), int(i[2]), (0, 255, 0), 2)
-                # cv2.circle(cimg, (i[0], i[1]), 2, (0, 0, 255), 3)
+                if debug:
+                    cv2.circle(cimg, (i[0], i[1]), int(i[2]), (0, 255, 0), 2)
+                    cv2.circle(cimg, (i[0], i[1]), 2, (0, 0, 255), 3)
 
-                # print("MV heatmap %d: center: (%d, %d), current_rad: %.02f" %(global_img_idx%400, i[0], i[1], current_rad))
-            # roi_heatmap_file = "test_roi_heatmap_%d_%d_%d.png" %(global_img_idx%400, i[0], i[1])
-            # cv2.imwrite(roi_heatmap_file, cimg)
+                if debug:
+                    print("MV heatmap %d-%d-%d: center: (%d, %d), current_rad: %.02f" %(tmp_img_idx, idx, sub_idx, i[0], i[1], current_rad))
+
+            preds[idx, 0, 0] /= sub_idx
+            preds[idx, 0, 1] /= sub_idx
+            if debug:
+                roi_heatmap_file = "./debug/test_roi_heatmap_%d_%d_%d.png" %(tmp_img_idx%400, int(preds[idx, 0, 0]), int(preds[idx, 0, 1]))
+                cv2.imwrite(roi_heatmap_file, cimg)
 
     return preds
 
-def get_final_preds(config, batch_heatmap_ds, batch_heatmap_roi, offsets_in_roi, meta):
+def get_final_preds(config, batch_heatmap_ds, batch_heatmap_roi, offsets_in_roi, meta, debug=False):
     coords_ds, maxvals_ds = get_max_preds(batch_heatmap_ds)
     if config.TRAIN.MV_IDEA:
-        coords_roi = get_heatmap_center_preds(batch_heatmap_roi)
+        coords_roi = get_heatmap_center_preds(batch_heatmap_roi, debug=debug)
     else:
         coords_roi, maxvals_roi = get_max_preds(batch_heatmap_roi)
 

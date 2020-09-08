@@ -102,8 +102,19 @@ class FoveaDataset(Dataset):
 
         if self.mv_idea_hm1:
             # xiaofeng changed it -- use a continuous gray level change circle, center = 0
-            dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2) / radius
-            return dist_from_center
+            # dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2) / radius
+            # consider gaussian, radius = 40
+            dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2)
+            mask = dist_from_center <= radius
+
+            # xiaofeng changed it -- use a continuous gray level change circle, center = 0
+            # dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2) / radius
+            # consider gaussian, radius = 40, O2=5^2=25 -->
+            # dist_from_center_1 = 1 - np.exp(- ((X - center[0]) ** 2 + (Y - center[1]) ** 2) / (2 * (radius * 1.2) ** 2))
+            dist_from_center_1 = np.exp(- ((X - center[0]) ** 2 + (Y - center[1]) ** 2) / (2 * (radius * 1.2) ** 2))
+            dist_from_center_1[~mask] = 0
+
+            return dist_from_center_1
         else:
             mask = dist_from_center <= radius
             return mask
@@ -403,7 +414,8 @@ class FoveaDataset(Dataset):
             image_size = np.array([region_size, region_size], np.int32)
             if self.mv_idea:
                 if self.mv_idea_hm1:
-                    heatmap_roi = np.ones((1,
+                    # comment: xiaofeng tried np.ones
+                    heatmap_roi = np.zeros((1,
                                             region_size,
                                             region_size),
                                            dtype=np.float32)
@@ -421,7 +433,10 @@ class FoveaDataset(Dataset):
 
             # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
             if self.mv_idea:
-                tmp_size = self.sigma_roi * 6
+                if self.mv_idea_hm1:
+                    tmp_size = self.sigma_roi * 10
+                else:
+                    tmp_size = self.sigma_roi * 8
             else:
                 tmp_size = self.sigma_roi * 3
 
@@ -458,10 +473,10 @@ class FoveaDataset(Dataset):
             if self.mv_idea:
                 # create a circle
                 if self.mv_idea_hm1:
-                    # method 2 -- set the center point 0 -- black
+                    # method 2 -- set the center point to 1 -- make it same as ds area
                     g = self.create_circular_mask(size, size)
                 else:
-                # set the center point 0
+                    # set the center area to 1
                     g = np.ones((size, size), np.uint8)
                     mask = self.create_circular_mask(size, size)
                     g[mask] = 1

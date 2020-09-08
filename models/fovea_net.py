@@ -545,7 +545,7 @@ class FoveaNet(nn.Module):
         #                        bias=False)
         # self.bn3 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # self.relu = nn.ReLU(inplace=True)
-        self.orig_stemnet = False
+        self.orig_stemnet = cfg.TRAIN.ORIG_STEMNET
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
         self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)

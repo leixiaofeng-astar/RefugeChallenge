@@ -218,7 +218,7 @@ class Dataset(FoveaDataset):
             assert ('Unknown image set: %s' % (image_set))
 
 
-    def evaluate(self, preds, output_dir):
+    def evaluate(self, preds, output_dir, debug_enable=False):
         num_images = len(self.db)
         assert num_images == len(self.db)
 
@@ -243,12 +243,25 @@ class Dataset(FoveaDataset):
             csv_file = os.path.join(output_dir, 'fovea_location_results.csv')
             with open(csv_file, 'w') as f:
                 cw = csv.writer(f, delimiter=",", lineterminator="\n")
-                cw.writerow(['ImageName', 'Fovea_X', 'Fovea_Y'])
-                for _ in range(num_images):
-                    image_name = os.path.basename(self.db[_]['filename'])
-                    fovea_x = '%.2f' %(preds[_, 0] + 1)
-                    fovea_y = '%.2f' %(preds[_, 1] + 1)
-                    cw.writerow([image_name, fovea_x, fovea_y])
+                if debug_enable:
+                    cw.writerow(['ImageName', 'Fovea_X', 'Fovea_Y', 'FoveaX_GT', 'FoveaY_GT', 'X_bias', 'Y_bias'])
+                    for _ in range(num_images):
+                        image_name = os.path.basename(self.db[_]['filename'])
+                        fovea_x = '%.2f' % (preds[_, 0])
+                        fovea_y = '%.2f' % (preds[_, 1])
+                        FoveaX_GT = '%.2f' % (self.db[_]['fovea'][0])
+                        FoveaY_GT = '%.2f' % (self.db[_]['fovea'][1])
+                        X_bias = '%.2f' % (preds[_, 0] - self.db[_]['fovea'][0])
+                        Y_bias = '%.2f' % (preds[_, 1] - self.db[_]['fovea'][1])
+                        cw.writerow([image_name, fovea_x, fovea_y, FoveaX_GT, FoveaY_GT, X_bias, Y_bias])
+                else:
+                    cw.writerow(['ImageName', 'Fovea_X', 'Fovea_Y'])
+                    for _ in range(num_images):
+                        image_name = os.path.basename(self.db[_]['filename'])
+                        # TODO : check if +1 if necessary
+                        fovea_x = '%.2f' %(preds[_, 0] + 1)
+                        fovea_y = '%.2f' %(preds[_, 1] + 1)
+                        cw.writerow([image_name, fovea_x, fovea_y])
                 f.close()
 
         return l2_dist_avg

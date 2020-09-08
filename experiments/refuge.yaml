@@ -120,6 +120,7 @@ TRAIN:
   FULL_DATA: false
   EFF_NET: false
   HRNET_ONLY: false
+  ORIG_STEMNET: true
   DATA_CLAHE: false
   ROI_CLAHE: false
   MV_IDEA: false
@@ -129,6 +130,7 @@ TEST:
   FLIP_TEST: true
   RELEASE_TEST: false
   MODEL_FILE: ''
+  DEBUG: false
 DEBUG:
   DEBUG: true
   SAVE_HEATMAP_DS_GT: true

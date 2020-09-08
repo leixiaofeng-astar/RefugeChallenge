@@ -186,9 +186,16 @@ def main():
         pin_memory=True
     )
 
+    debug_enable = cfg.TEST.DEBUG
     # evaluate on validation set
-    validate(cfg, valid_loader, valid_dataset, model, criterion,
-             final_output_dir, tb_log_dir)
+    if debug_enable:
+        debug_dir = './debug'
+        if not os.path.isdir(str(debug_dir)):
+            os.mkdir(debug_dir)
+        validate(cfg, valid_loader, valid_dataset, model, criterion, debug_dir, tb_log_dir, debug_all=debug_enable)
+    else:
+        validate(cfg, valid_loader, valid_dataset, model, criterion, final_output_dir, tb_log_dir)
+
 
 
 if __name__ == '__main__':

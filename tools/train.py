@@ -270,9 +270,11 @@ def main():
     last_epoch = -1
     optimizer = get_optimizer(cfg, model)
     begin_epoch = cfg.TRAIN.BEGIN_EPOCH
-    checkpoint_file = os.path.join(
-        final_output_dir, 'checkpoint.pth'
-    )
+
+    if cfg.TEST.MODEL_FILE:
+        checkpoint_file = cfg.TEST.MODEL_FILE
+    else:
+        checkpoint_file = os.path.join(final_output_dir, 'checkpoint.pth')
 
     if cfg.AUTO_RESUME and os.path.exists(checkpoint_file):
         logger.info("=> loading checkpoint '{}'".format(checkpoint_file))

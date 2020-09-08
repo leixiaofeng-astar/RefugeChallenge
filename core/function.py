@@ -112,7 +112,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
 
 
 def validate(config, val_loader, val_dataset, model, criterion, output_dir,
-             tb_log_dir, writer_dict=None, db_vals=[]):
+             tb_log_dir, writer_dict=None, db_vals=[], debug_all=False):
     batch_time = AverageMeter()
     lr_init_dists = AverageMeter()
     hr_init_dists = AverageMeter()
@@ -158,12 +158,19 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                     get_final_preds(config,
                                     heatmap_ds_pred_flip.cpu().numpy(),
                                     heatmap_roi_pred_flip.cpu().numpy(),
-                                    offset_in_roi_pred_flip.cpu().numpy(), meta_flip)
+                                    offset_in_roi_pred_flip.cpu().numpy(), meta_flip, debug=debug_all)
 
                 width = input.size()[3]
                 fovea_lr_init_pred_flip[:, 0] = width - fovea_lr_init_pred_flip[:, 0]
                 fovea_hr_init_pred_flip[:, 0] = width - fovea_hr_init_pred_flip[:, 0]
                 fovea_final_pred_flip[:, 0] = width - fovea_final_pred_flip[:, 0]
+
+                if debug_all:
+                    gt_location = meta['fovea'].cpu().numpy()
+                    hr_loc_orig = fovea_hr_init_pred
+                    hr_loc_flip = fovea_hr_init_pred_flip
+                    logger.info('Image No %d: GT:(%.2f, %.2f), HR:(%.2f, %.2f), HR_Flip:(%.2f, %.2f)' \
+    %(i+1, gt_location(0, 0), gt_location(0, 1), hr_loc_orig(0, 0), hr_loc_orig(0, 1), hr_loc_flip(0, 0), hr_loc_flip(0, 1)))
 
                 fovea_lr_init_pred = (fovea_lr_init_pred + fovea_lr_init_pred_flip) * 0.5
                 fovea_hr_init_pred = (fovea_hr_init_pred + fovea_hr_init_pred_flip) * 0.5
@@ -189,23 +196,21 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             end = time.time()
 
             image_path.extend(meta['image'])
-
-            if i % config.PRINT_FREQ == 0:
+            # Test: [0/100]  Time 0.251 (0.275) LRInit 23.7397 (18.6406) HRInit 22.5420 (18.3990) Final 22.5497 (18.3919)
+            if (i % config.PRINT_FREQ == 0) or (debug_all is True):
                 msg = 'Test: [{0}/{1}]\t' \
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
                       'LRInit {lr_init_dist.val:.4f} ({lr_init_dist.avg:.4f})\t' \
                       'HRInit {hr_init_dist.val:.4f} ({hr_init_dist.avg:.4f})\t' \
                       'Final {final_dist.val:.4f} ({final_dist.avg:.4f})\t' \
                       .format(
-                          i, len(val_loader), batch_time=batch_time,
+                          i+1, len(val_loader), batch_time=batch_time,
                           lr_init_dist=lr_init_dists,
                           hr_init_dist=hr_init_dists,
                           final_dist=final_dists)
                 logger.info(msg)
 
-                prefix = '{}_{}'.format(
-                    os.path.join(output_dir, 'val'), i
-                )
+                prefix = '{}_{}'.format(os.path.join(output_dir, 'val'), i)
 
                 save_debug_images(config,
                                   input, meta['input_roi'],
@@ -255,8 +260,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
         hr_init_avg_l2_dist /= sum_db
         final_avg_l2_dist /= sum_db
     else:
-        lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir='./')
-        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir='./log')
+        lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir='./', debug_enable=debug_all)
+        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir='./log', debug_enable=debug_all)
         final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
 
     logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
