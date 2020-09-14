@@ -104,6 +104,7 @@ _C.TEST.FLIP_TEST = True
 _C.TEST.RELEASE_TEST = False
 _C.TEST.MODEL_FILE = ''
 _C.TEST.DEBUG = False
+_C.TEST.TRIAL_RUN = False
 
 # debug
 _C.DEBUG = CN()

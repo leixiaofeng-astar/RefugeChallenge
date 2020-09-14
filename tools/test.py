@@ -133,7 +133,11 @@ def main():
         logger.info('=> loading model from {}'.format(cfg.TEST.MODEL_FILE))
         (filepath, tempfilename) = os.path.split(cfg.TEST.MODEL_FILE)
         if "checkpoint" in tempfilename:
-            checkpoint = torch.load(cfg.TEST.MODEL_FILE)
+            # workaround to load python2 model -- Note: the final result could be different
+            if 'P2' in tempfilename:
+                checkpoint = torch.load(cfg.TEST.MODEL_FILE, encoding='latin1')
+            else:
+                checkpoint = torch.load(cfg.TEST.MODEL_FILE)
             model.load_state_dict(checkpoint['best_state_dict'])
         else:
             model.load_state_dict(torch.load(cfg.TEST.MODEL_FILE), strict=False)
@@ -167,10 +171,19 @@ def main():
             ])
         )
     else:
-        normalize = transforms.Normalize(
-            # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
-            mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
-        )
+        trial_enable = cfg.TEST.TRIAL_RUN
+        if not trial_enable:
+            normalize = transforms.Normalize(
+                # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
+                mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
+            )
+        else:
+            normalize = transforms.Normalize(
+                # prepare for refuge2 final submission - 'Refuge2-Ext'
+                # mean=[0.435, 0.211, 0.070], std=[0.310, 0.166, 0.085]
+                mean=[0.532, 0.259, 0.086], std=[0.259, 0.148, 0.088]
+            )
+
         valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
             cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
             transforms.Compose([

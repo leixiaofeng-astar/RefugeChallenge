@@ -131,6 +131,7 @@ TEST:
   RELEASE_TEST: false
   MODEL_FILE: ''
   DEBUG: false
+  TRIAL_RUN: false
 DEBUG:
   DEBUG: true
   SAVE_HEATMAP_DS_GT: true

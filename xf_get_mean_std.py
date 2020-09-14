@@ -7,6 +7,10 @@ python3 xf_get_mean_std.py --dirs REFUGE-Training400/Training400,REFUGE-Validati
 
 python3 xf_get_mean_std.py --dirs REFUGE-Validation400,REFUGE-Test400,Refuge2-Validation
 
+python3 xf_get_mean_std.py --dirs Refuge2-Ext
+
+python3 xf_get_mean_std.py --dirs Refuge2-Test
+
 """
 
 import numpy as np
@@ -19,20 +23,7 @@ import timeit
 import argparse
 import imgaug.augmenters as iaa
 import copy
-parser = argparse.ArgumentParser()
 
-parser.add_argument('--dirs', dest='img_dirs', type=str, required=True, 
-                    help='Root of Image dataset(s). Can specify multiple directories (separated with ",")')
-parser.add_argument("--gray", dest='gray_alpha', type=float, default=0.5, 
-                    help='Convert images to grayscale by so much degree.')
-parser.add_argument('--size', dest='chosen_size', type=int, default=0, 
-                    help='Use images of this size (among all cropping sizes). Default: 0, i.e., use all sizes.')
-args = parser.parse_args()
-                    
-# number of channels of the dataset image, 3 for color jpg, 1 for grayscale img
-# you need to change it to reflect your dataset
-CHANNEL_NUM = 3
-img_types = ['png', 'jpg']
 
 def img_preprocess_1(img):
     # load data
@@ -88,6 +79,19 @@ def img_preprocess_2(img):
     return data_numpy
 
 
+def img_preprocess_3(img):
+    # load data
+    data_numpy = copy.deepcopy(img)
+
+    dh, dw = data_numpy.shape[:2]
+    # crop left 300, right 500
+    pw_l = 300
+    pw_r = 500
+    data_numpy = data_numpy[:, pw_l:(dw - pw_r), :]
+
+    return data_numpy
+
+
 def cal_dir_stat(root, gray_alpha, chosen_size):
     cls_dirs = [ d for d in listdir(root) if isdir(join(root, d)) and 'label' not in d ]
     pixel_num = 0 # store all pixel number in the dataset
@@ -109,11 +113,12 @@ def cal_dir_stat(root, gray_alpha, chosen_size):
         for path in im_paths:
             im = cv2.imread(path) # image in M*N*CHANNEL_NUM shape, channels in BGR order
             # xiaofeng change -- the output must be R, G, B sequence
-            im = im[:, :, ::-1]   # Change channels to RGB
-            im = gray_trans.augment_image(im)
+            # im = im[:, :, ::-1]   # Change channels to RGB
+            # im = gray_trans.augment_image(im)
             # im = im[:, :, ::-1]  # Change channels to RGB
             # print("process %s " %path)
-            # im = img_preprocess_1(im)
+            # im = img_preprocess_3(im)
+            im = im[:, :, ::-1]  # Change channels to RGB
 
             im = im/255.0
             pixel_num += (im.size/CHANNEL_NUM)
@@ -125,22 +130,44 @@ def cal_dir_stat(root, gray_alpha, chosen_size):
     
     return rgb_mean, rgb_std
 
-# The script assumes that under img_dir_path, there are separate directories for each class
-# of training images.
-img_dirs = args.img_dirs.split(",")
-# img_dirs = ['REFUGE-Training400/Training400', \
-#            'REFUGE-Validation400/REFUGE-Validation400', \
-#            'REFUGE-Test400/Test400', \
-#            'Refuge2-Validation/Refuge2-Validation']
 
-for img_dir in img_dirs:
-    img_dir_path = "/home/user/eye/xf_refuge/data/{}/".format(img_dir)
-    print("Calculating {}...".format(img_dir_path))
-    start = timeit.default_timer()
-    mean, std = cal_dir_stat(img_dir_path, args.gray_alpha, args.chosen_size)
-    end = timeit.default_timer()
-    print("elapsed time: {}".format(end-start))
-    mean_str = ", ".join([ "%.3f" %x for x in mean ])
-    std_str  = ", ".join([ "%.3f" %x for x in std ])
+def parse_args():
+    parser = argparse.ArgumentParser()
 
-    print("mean:\n[{}]\nstd:\n[{}]".format(mean_str, std_str))
+    parser.add_argument('--dirs', dest='img_dirs', type=str, required=True,
+                        help='Root of Image dataset(s). Can specify multiple directories (separated with ",")')
+    parser.add_argument("--gray", dest='gray_alpha', type=float, default=0.5,
+                        help='Convert images to grayscale by so much degree.')
+    parser.add_argument('--size', dest='chosen_size', type=int, default=0,
+                        help='Use images of this size (among all cropping sizes). Default: 0, i.e., use all sizes.')
+    args = parser.parse_args()
+    return args
+
+
+if __name__ == '__main__':
+    args = parse_args()
+
+    # The script assumes that under img_dir_path, there are separate directories for each class
+    # of training images.
+    img_dirs = args.img_dirs.split(",")
+    # img_dirs = ['REFUGE-Training400/Training400', \
+    #            'REFUGE-Validation400/REFUGE-Validation400', \
+    #            'REFUGE-Test400/Test400', \
+    #            'Refuge2-Validation/Refuge2-Validation']
+
+    # number of channels of the dataset image, 3 for color jpg, 1 for grayscale img
+    # you need to change it to reflect your dataset
+    CHANNEL_NUM = 3
+    img_types = ['png', 'jpg']
+
+    for img_dir in img_dirs:
+        img_dir_path = "/home/user/eye/xf_refuge/data/{}/".format(img_dir)
+        print("Calculating {}...".format(img_dir_path))
+        start = timeit.default_timer()
+        mean, std = cal_dir_stat(img_dir_path, args.gray_alpha, args.chosen_size)
+        end = timeit.default_timer()
+        print("elapsed time: {}".format(end-start))
+        mean_str = ", ".join([ "%.3f" %x for x in mean ])
+        std_str  = ", ".join([ "%.3f" %x for x in std ])
+
+        print("mean:\n[{}]\nstd:\n[{}]".format(mean_str, std_str))

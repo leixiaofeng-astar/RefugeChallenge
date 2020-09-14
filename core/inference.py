@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -72,12 +73,15 @@ def get_heatmap_center_preds(batch_heatmaps, debug=False):
         # handle it as one image
         batch_heatmaps[batch_heatmaps < 0] = 0
         img = np.uint8( batch_heatmaps[idx, :, :, :] * 255)
+        # img = cv2.medianBlur(img, 5)
         img = cv2.medianBlur(img, 7)
         cimg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         # param1：使用HOUGH_GRADIENT方法检测圆形时，传递给Canny边缘检测器的两个阈值的较大值。
         # param2：使用HOUGH_GRADIENT方法检测圆形时，检测圆形的累加器阈值，阈值越大检测的圆形越精确
         # https://blog.csdn.net/weixin_42904405/article/details/82814768
         # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_imgproc/py_houghcircles/py_houghcircles.html
+        # circles = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, 1, 20,
+        #                            param1=50, param2=30, minRadius=10, maxRadius=30)
         circles = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, 1, 20,
                                    param1=30, param2=30, minRadius=18, maxRadius=50)
         max_rad = 0.0

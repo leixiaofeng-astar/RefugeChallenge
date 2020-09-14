@@ -547,13 +547,14 @@ class FoveaNet(nn.Module):
         # self.relu = nn.ReLU(inplace=True)
         self.orig_stemnet = cfg.TRAIN.ORIG_STEMNET
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
-        self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # xf add it
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(64)
+        if self.cfg.TRAIN.MV_IDEA:
+            self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
+            self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False)
+            self.bn3 = nn.BatchNorm2d(64)
 
         self.relu = nn.ReLU(inplace=True)
         
@@ -681,15 +682,16 @@ class FoveaNet(nn.Module):
             nn.ReLU(),
             nn.Linear(16, 2)
         )
-        self.eff_regress = nn.Sequential(
-            nn.Linear(1792, 160),
-            nn.BatchNorm1d(160, momentum=BN_MOMENTUM),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(160, 16),
-            nn.BatchNorm1d(16, momentum=BN_MOMENTUM),
-            nn.ReLU(),
-            nn.Linear(16, 2)
+        if self.cfg.TRAIN.EFF_NET:
+            self.eff_regress = nn.Sequential(
+                nn.Linear(1792, 160),
+                nn.BatchNorm1d(160, momentum=BN_MOMENTUM),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(160, 16),
+                nn.BatchNorm1d(16, momentum=BN_MOMENTUM),
+                nn.ReLU(),
+                nn.Linear(16, 2)
         )
 
     def init_weights(self, pretrained):

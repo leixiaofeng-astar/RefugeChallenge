@@ -84,6 +84,7 @@ class FoveaDataset(Dataset):
         self.clahe_enaled = cfg.TRAIN.DATA_CLAHE
         self.mv_idea = cfg.TRAIN.MV_IDEA
         self.mv_idea_hm1 = cfg.TRAIN.MV_IDEA_HM1
+        self.trial_enable = cfg.TEST.TRIAL_RUN
 
         self.transform = transform
         self.db = []
@@ -182,7 +183,18 @@ class FoveaDataset(Dataset):
         #     # repeat 3 times to make fake RGB images
         #     data_numpy = np.tile(data_numpy, [1, 1, 3])
 
+        # prepare for refuge2 final submission - 'Refuge2-Ext'
+        # image size is 4288x2848
+        if self.trial_enable:
+            dh, dw = data_numpy.shape[:2]
+            # crop left 300, right 500
+            pw_l = 300
+            pw_r = 500
+            data_numpy = data_numpy[:, pw_l:(dw-pw_r), :]
+            fovea[0] -= pw_l
+
         dh, dw = data_numpy.shape[:2]
+        # TODO -- need to do sth for different image size
         if dh != self.image_size[1] or dw != self.image_size[0]:
             data_numpy = cv2.resize(data_numpy, dsize=(self.image_size[0], self.image_size[1]), interpolation=cv2.INTER_LINEAR)
             h_ratio = self.image_size[1] * 1.0 / dh
@@ -436,7 +448,7 @@ class FoveaDataset(Dataset):
                 if self.mv_idea_hm1:
                     tmp_size = self.sigma_roi * 10
                 else:
-                    tmp_size = self.sigma_roi * 8
+                    tmp_size = self.sigma_roi * 10
             else:
                 tmp_size = self.sigma_roi * 3
 

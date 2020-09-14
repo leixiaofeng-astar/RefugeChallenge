@@ -192,7 +192,12 @@ class Dataset(FoveaDataset):
         elif image_set == 'val2':
             # TODO: refuge2 validation db -- xiaofeng comment
             # refuge2 validation images and labels
-            val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
+            trial_enable = self.cfg.TEST.TRIAL_RUN
+            if not trial_enable:
+                val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
+            else:
+                # prepare for refuge2 final submission
+                val2_anno_filename = os.path.join(self.root, 'Refuge2-Ext-GT', 'IDRiD_Fovea_Center_GT.xlsx')
             workbook = load_workbook(val2_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -204,7 +209,13 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=4).value) - 1
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
+                if not trial_enable:
+                    image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
+                else:
+                    # prepare for refuge2 final submission
+                    fname = fname + '.jpg'
+                    image_file = os.path.join(self.root, 'Refuge2-Ext', 'Refuge2-Ext', fname)
+
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
@@ -247,8 +258,8 @@ class Dataset(FoveaDataset):
                     cw.writerow(['ImageName', 'Fovea_X', 'Fovea_Y', 'FoveaX_GT', 'FoveaY_GT', 'X_bias', 'Y_bias'])
                     for _ in range(num_images):
                         image_name = os.path.basename(self.db[_]['filename'])
-                        fovea_x = '%.2f' % (preds[_, 0])
-                        fovea_y = '%.2f' % (preds[_, 1])
+                        fovea_x = '%.2f' % (preds[_, 0]+1)
+                        fovea_y = '%.2f' % (preds[_, 1]+1)
                         FoveaX_GT = '%.2f' % (self.db[_]['fovea'][0])
                         FoveaY_GT = '%.2f' % (self.db[_]['fovea'][1])
                         X_bias = '%.2f' % (preds[_, 0] - self.db[_]['fovea'][0])
