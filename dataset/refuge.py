@@ -27,8 +27,16 @@ class Dataset(FoveaDataset):
         self.db = self._get_db(image_set)
 
         # test_img = cv2.imread(self.db[0]['image'], cv2.IMREAD_COLOR)
-        test_img = self.db[0]['image']
-        self.db_image_size = np.array([test_img.shape[1], test_img.shape[0]])
+        # test_img = self.db[0]['image']
+        # self.db_image_size = np.array([test_img.shape[1], test_img.shape[0]])
+
+        # import pdb
+        # pdb.set_trace()
+        self.db_image_size = []
+        db_len = len(self.db)
+        for i in range(db_len):
+            test_img = self.db[i]['image']
+            self.db_image_size.append(np.array([test_img.shape[1], test_img.shape[0]]))
 
         if is_train and cfg.DATASET.TRAIN_FOLD > 0:
             np.random.seed(1234) # fix seed
@@ -198,6 +206,7 @@ class Dataset(FoveaDataset):
             else:
                 # prepare for refuge2 final submission
                 val2_anno_filename = os.path.join(self.root, 'Refuge2-Ext-GT', 'IDRiD_Fovea_Center_GT.xlsx')
+
             workbook = load_workbook(val2_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -217,7 +226,6 @@ class Dataset(FoveaDataset):
                     image_file = os.path.join(self.root, 'Refuge2-Ext', 'Refuge2-Ext', fname)
 
                 if not self.is_image_file(image_file): continue
-
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
                 val2_db.append({
                     'image': data_numpy,
@@ -241,8 +249,13 @@ class Dataset(FoveaDataset):
         ph = (image_size[1] - crop_size[1]) // 2
         preds[:, 0] += pw
         preds[:, 1] += ph
-        preds[:, 0] *= (self.db_image_size[0] * 1.0 / image_size[0])
-        preds[:, 1] *= (self.db_image_size[1] * 1.0 / image_size[1])
+        # preds[:, 0] *= (self.db_image_size[0] * 1.0 / image_size[0])
+        # preds[:, 1] *= (self.db_image_size[1] * 1.0 / image_size[1])
+
+        for x in range(num_images):
+            preds[x, 0] *= (self.db_image_size[x][0] * 1.0 / image_size[0])
+            preds[x, 1] *= (self.db_image_size[x][1] * 1.0 / image_size[1])
+            # self.db_image_size.append(np.array([test_img.shape[1], test_img.shape[0]]))
 
         l2_dist_sum = 0.
         for _ in range(num_images):
