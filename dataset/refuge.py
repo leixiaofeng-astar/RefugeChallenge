@@ -95,7 +95,8 @@ class Dataset(FoveaDataset):
             if make_sample_gt:
                 test_anno_filename = os.path.join(self.root, 'test-GT', 'test_Fovea_locations.xlsx')
             else:
-                test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+                # test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+                test_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Val.xlsx')
             workbook = load_workbook(test_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -110,7 +111,8 @@ class Dataset(FoveaDataset):
                 if make_sample_gt:
                     image_file = os.path.join(self.root, 'test_img', fname)
                 else:
-                    image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                    # image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                    image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Val', fname)
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
@@ -122,7 +124,7 @@ class Dataset(FoveaDataset):
             return test_db
         elif image_set == 'val':
             # validation images and labels
-            val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations.xlsx')
+            val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Train.xlsx')
             workbook = load_workbook(val_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -134,7 +136,7 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=4).value) - 1
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Validation400', fname)
+                image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Train', fname)
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
@@ -202,7 +204,8 @@ class Dataset(FoveaDataset):
             # refuge2 validation images and labels
             trial_enable = self.cfg.TEST.TRIAL_RUN
             if not trial_enable:
-                val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
+                val2_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+                # val2_anno_filename = os.path.join(self.root, 'Refuge2-Validation-GT', 'Fovea_locations_dummy.xlsx')
             else:
                 # prepare for refuge2 final submission
                 val2_anno_filename = os.path.join(self.root, 'Refuge2-Ext-GT', 'IDRiD_Fovea_Center_GT.xlsx')
@@ -219,7 +222,8 @@ class Dataset(FoveaDataset):
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
                 if not trial_enable:
-                    image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
+                    image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                    # image_file = os.path.join(self.root, 'Refuge2-Validation', 'Refuge2-Validation', fname)
                 else:
                     # prepare for refuge2 final submission
                     fname = fname + '.jpg'

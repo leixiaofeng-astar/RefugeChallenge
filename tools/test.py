@@ -1,4 +1,18 @@
+'''
+Instructions to use:
+     python3.7 tools/test.py --cfg experiments/refuge.yaml
+     TRAIN.MV_IDEA True
+     TRAIN.MV_IDEA_HM1 True
+     TEST.MODEL_FILE output/refuge/fovea_net/refuge/checkpoint_HM1_L7_Aug28.pth
+     TEST.RELEASE_TEST False
 
+     python3.7 tools/test.py --cfg experiments/refuge.yaml TEST.MODEL_FILE output/refuge/fovea_net/refuge/model_best.pth
+     cfg.TEST.RELEASE_TEST True
+
+description:
+    test the model
+
+'''
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -161,7 +175,9 @@ def main():
     if release_result is False:
         normalize = transforms.Normalize(
             # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
-            mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+            # mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+            # 160 images from refuge1 val
+            mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
         )
         valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
             cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,

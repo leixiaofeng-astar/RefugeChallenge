@@ -3,13 +3,15 @@ in this script, we calculate the image per channel mean and standard
 deviation in the training set, do not calculate the statistics on the
 whole dataset, as per here http://cs231n.github.io/neural-networks-2/#datapre
 
-python3 xf_get_mean_std.py --dirs REFUGE-Training400/Training400,REFUGE-Validation400,REFUGE-Test400,Refuge2-Validation
+python3.7 xf_get_mean_std.py --dirs REFUGE-Training400/Training400,REFUGE-Validation400,REFUGE-Test400,Refuge2-Validation
 
-python3 xf_get_mean_std.py --dirs REFUGE-Validation400,REFUGE-Test400,Refuge2-Validation
+python3.7 xf_get_mean_std.py --dirs REFUGE-Validation400,REFUGE-Test400,Refuge2-Validation
 
-python3 xf_get_mean_std.py --dirs Refuge2-Ext
+python3.7 xf_get_mean_std.py --dirs Refuge2-Ext
 
-python3 xf_get_mean_std.py --dirs Refuge2-Test
+python3.7 xf_get_mean_std.py --dirs Refuge2-Test
+
+python3.7 xf_get_mean_std.py --dirs REFUGE-Validation400/REFUGE-Val2Train
 
 """
 
@@ -98,20 +100,46 @@ def cal_dir_stat(root, gray_alpha, chosen_size):
     channel_sum = np.zeros(CHANNEL_NUM)
     channel_sum_squared = np.zeros(CHANNEL_NUM)
     gray_trans = iaa.Grayscale(alpha=gray_alpha)
-    
-    for idx, d in enumerate(cls_dirs):
-        print("Class '{}'".format(d))
+
+    if len(cls_dirs) != 0:
+        for idx, d in enumerate(cls_dirs):
+            print("Class '{}'".format(d))
+            im_paths = []
+            for img_type in img_types:
+                im_paths += glob(join(root, d, "*.{}".format(img_type)))
+            if chosen_size:
+                all_sizes_count = len(im_paths)
+                im_paths = filter(lambda name: '_{}_'.format(chosen_size) in name, im_paths)
+                im_paths = list(im_paths)
+                print("{} size {} images chosen from {}".format(len(im_paths), chosen_size, all_sizes_count))
+
+            for path in im_paths:
+                im = cv2.imread(path) # image in M*N*CHANNEL_NUM shape, channels in BGR order
+                # xiaofeng change -- the output must be R, G, B sequence
+                # im = im[:, :, ::-1]   # Change channels to RGB
+                # im = gray_trans.augment_image(im)
+                # im = im[:, :, ::-1]  # Change channels to RGB
+                # print("process %s " %path)
+                # im = img_preprocess_3(im)
+                im = im[:, :, ::-1]  # Change channels to RGB
+
+                im = im/255.0
+                pixel_num += (im.size/CHANNEL_NUM)
+                channel_sum += np.sum(im, axis=(0, 1))
+                channel_sum_squared += np.sum(np.square(im), axis=(0, 1))
+    else:
+        print("read images directly")
         im_paths = []
         for img_type in img_types:
-            im_paths += glob(join(root, d, "*.{}".format(img_type)))
+            im_paths += glob(join(root, "*.{}".format(img_type)))
         if chosen_size:
             all_sizes_count = len(im_paths)
             im_paths = filter(lambda name: '_{}_'.format(chosen_size) in name, im_paths)
             im_paths = list(im_paths)
             print("{} size {} images chosen from {}".format(len(im_paths), chosen_size, all_sizes_count))
-            
+
         for path in im_paths:
-            im = cv2.imread(path) # image in M*N*CHANNEL_NUM shape, channels in BGR order
+            im = cv2.imread(path)  # image in M*N*CHANNEL_NUM shape, channels in BGR order
             # xiaofeng change -- the output must be R, G, B sequence
             # im = im[:, :, ::-1]   # Change channels to RGB
             # im = gray_trans.augment_image(im)
@@ -120,8 +148,8 @@ def cal_dir_stat(root, gray_alpha, chosen_size):
             # im = img_preprocess_3(im)
             im = im[:, :, ::-1]  # Change channels to RGB
 
-            im = im/255.0
-            pixel_num += (im.size/CHANNEL_NUM)
+            im = im / 255.0
+            pixel_num += (im.size / CHANNEL_NUM)
             channel_sum += np.sum(im, axis=(0, 1))
             channel_sum_squared += np.sum(np.square(im), axis=(0, 1))
 
@@ -161,8 +189,8 @@ if __name__ == '__main__':
     img_types = ['png', 'jpg']
 
     for img_dir in img_dirs:
-        img_dir_path = "/home/user/eye/xf_refuge/data/{}/".format(img_dir)
-        print("Calculating {}...".format(img_dir_path))
+        img_dir_path = "/data/xiaofeng/xf_refuge/data/{}/".format(img_dir)
+        print("Calculating {} starting ...".format(img_dir_path))
         start = timeit.default_timer()
         mean, std = cal_dir_stat(img_dir_path, args.gray_alpha, args.chosen_size)
         end = timeit.default_timer()

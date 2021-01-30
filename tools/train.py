@@ -1,3 +1,20 @@
+'''
+
+Instructions to use:
+    python3.7 tools/train.py --cfg experiments/refuge.yaml TRAIN.MV_IDEA True TRAIN.MV_IDEA_HM1 True TRAIN.LR 0.004
+    python3.7 tools/train.py --cfg experiments/refuge.yaml
+    TRAIN.MV_IDEA True
+    TRAIN.MV_IDEA_HM1 True
+    TRAIN.LR 0.002
+    TRAIN.END_EPOCH 500
+    LOSS.ROI_WEIGHT 0.8
+    TEST.MODEL_FILE output/refuge/fovea_net/refuge/checkpoint_HM1_L7_Aug28.pth
+
+description:
+    train refuge model
+
+'''
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -126,42 +143,10 @@ def main():
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT,
         hrnet_only=cfg.TRAIN.HRNET_ONLY).cuda()
 
-    # Data loading code
-    # normalize = transforms.Normalize(
-    #     mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
-    # )
-    # train_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
-    #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET, True,
-    #     transforms.Compose([
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ])
-    # )
-    # valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
-    #     cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
-    #     transforms.Compose([
-    #         transforms.ToTensor(),
-    #         normalize,
-    #     ])
-    # )
-    # 
-    # train_loader = torch.utils.data.DataLoader(
-    #     train_dataset,
-    #     batch_size=cfg.TRAIN.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
-    #     shuffle=cfg.TRAIN.SHUFFLE,
-    #     num_workers=cfg.WORKERS,
-    #     pin_memory=cfg.PIN_MEMORY
-    # )
-    # valid_loader = torch.utils.data.DataLoader(
-    #     valid_dataset,
-    #     batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
-    #     shuffle=False,
-    #     num_workers=cfg.WORKERS,
-    #     pin_memory=cfg.PIN_MEMORY
-    # )
-
     db_trains = []
     db_vals = []
+
+    # final_full_test is to use all 1200 images in training, default = False
     final_full_test = cfg.TRAIN.FULL_DATA
     normalize_1 = transforms.Normalize(
         mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
@@ -176,7 +161,10 @@ def main():
     db_trains.append(train_dataset_1)
 
     normalize_2 = transforms.Normalize(
-        mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
+        # mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
+        # the 240 images from val set
+        mean = [0.413, 0.273, 0.217], std = [0.289, 0.204, 0.161]
+
     )
     train_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
         cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, True,
@@ -186,19 +174,6 @@ def main():
         ])
     )
     db_trains.append(train_dataset_2)
-
-    if final_full_test is True:
-        normalize_3 = transforms.Normalize(
-            mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
-        )
-        train_dataset_3 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-            cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, True,
-            transforms.Compose([
-                transforms.ToTensor(),
-                normalize_3,
-            ])
-        )
-        db_trains.append(train_dataset_3)
 
     train_dataset = ConcatDataset(db_trains)
     logger.info("Combined Dataset: Total {} images".format(len(train_dataset)))
@@ -213,7 +188,9 @@ def main():
     )
 
     normalize = transforms.Normalize(
-        mean=[0.404, 0.271, 0.222], std=[0.284, 0.202, 0.163]
+        # mean=[0.404, 0.271, 0.222], std=[0.284, 0.202, 0.163]
+        # 160 images from refuge1 val
+        mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
     )
     val_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
         cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
@@ -223,31 +200,6 @@ def main():
         ])
     )
     db_vals.append(val_dataset_1)
-
-    if final_full_test is True:
-        normalize_1 = transforms.Normalize(
-            mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
-        )
-        val_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, False,
-            transforms.Compose([
-                transforms.ToTensor(),
-                normalize_1,
-            ])
-        )
-        db_vals.append(val_dataset_2)
-
-        normalize_2 = transforms.Normalize(
-            mean=[0.409, 0.270, 0.215], std=[0.288, 0.203, 0.160]
-        )
-        val_dataset_3 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, False,
-            transforms.Compose([
-                transforms.ToTensor(),
-                normalize_2,
-            ])
-        )
-        db_vals.append(val_dataset_3)
 
     valid_dataset = ConcatDataset(db_vals)
 
@@ -403,4 +355,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-    print("Refuge Fovea Train Program Exit ... \n")
+    print("Fovea Localization for Paper Training Program Exit ... \n")

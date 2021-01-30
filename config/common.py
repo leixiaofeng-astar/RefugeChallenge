@@ -49,7 +49,7 @@ _C.LOSS.REGRESS_WEIGHT = 1.0
 
 # DATASET related params
 _C.DATASET = CN()
-_C.DATASET.ROOT = '/home/user/eye/xf_refuge/data/'
+_C.DATASET.ROOT = '/data/xiaofeng/xf_refuge/data/'
 _C.DATASET.DATASET = 'refuge'
 _C.DATASET.TRAIN_SET = 'train+val'
 _C.DATASET.TRAIN_SET_1 = 'train'
