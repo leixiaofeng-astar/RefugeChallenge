@@ -9,6 +9,7 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
 import cv2
 import copy
 import numpy as np
@@ -30,11 +31,37 @@ bb2feat_dims = { 'resnet34':  [64, 64,  128, 256,  512],
                  'eff-b4':    [24, 32,  56,  160,  1792],   # input: 380
                }
 
+class ResNet18(nn.Module):
+    def __init__(self, num_class=2):
+        """Select conv1_1 ~ conv5_1 activation maps."""
+        super(ResNet18, self).__init__()
+        resnet = models.resnet18(pretrained=True)
+        self.features = nn.Sequential(*list(resnet.children())[:-1])
+        self.fc = nn.Linear(in_features=resnet.fc.in_features, out_features=num_class)
+        # xiaofeng modify it
+        '''
+        self.fc = nn.Sequential(
+            nn.Linear(in_features=resnet.fc.in_features, out_features=256),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(256, out_features=num_class),  # 2 possible outputs in this case
+            # nn.LogSoftmax(dim=1)  # For using NLLLoss()
+        )
+        '''
+
+    def forward(self, x):
+        """Extract multiple convolutional feature maps."""
+        features = self.features(x).view(x.shape[0], -1)
+        out = torch.sigmoid(self.fc(features))
+        out1 = torch.softmax(self.fc(features), dim=1)
+        #return features, out
+        return features, out, out1
+
+
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
-
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -533,7 +560,7 @@ class FoveaNet(nn.Module):
             nn.Conv2d(16, 1, kernel_size=1, padding=0)
         )
         self.hrnet_only = cfg.TRAIN.HRNET_ONLY
-
+        self.one_heatmap_channel = False
         # stem net
         # self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1,
         #                        bias=False)
@@ -550,6 +577,7 @@ class FoveaNet(nn.Module):
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+
         # xf add it
         if self.cfg.TRAIN.MV_IDEA:
             self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
@@ -657,11 +685,12 @@ class FoveaNet(nn.Module):
                     # Output resolution is 1/8 of input. Do upsampling to make resolution x 2
                     self.out_conv = nn.ConvTranspose2d(self.feat_dim, self.num_classes, 2, 2)
 
-            # end: xiaofeng add for efficientnet
+        # end: xiaofeng add for efficientnet
 
         # fusion layer
         self.convf = nn.Conv2d(16 + 16, 32, kernel_size=3, stride=1, padding=1, bias=False)
         self.bnf = nn.BatchNorm2d(32, momentum=BN_MOMENTUM)
+        self.convf_roi = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1, bias=False)
 
         # heatmap layer
         self.heatmap_roi = nn.Sequential(
@@ -1029,11 +1058,21 @@ class FoveaNet(nn.Module):
                 roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
 
                 # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
+                # crop_and_resize(image, center, output_size, scale=1)
                 roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
 
                 # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
-                roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
-                roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+                # test for the effect of feature fusion
+                remove_hr_feature = True
+                if remove_hr_feature:
+                    # TODO -- if we don't use HRNET feature, we don't concat the feature
+                    roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))
+                    # TODO -- if we don't use HRNET feature, we don't concat the feature
+                else:
+                    roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
+                    roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+
+
                 # 32 channel --> 1 channel  (batch, 1, 256, 256)
                 heatmap_roi_pred = self.heatmap_roi(roi_feats)
 

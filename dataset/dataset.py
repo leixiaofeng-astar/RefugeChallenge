@@ -278,11 +278,15 @@ class FoveaDataset(Dataset):
             orig_fovea = copy.deepcopy(fovea)
             fovea[0] -= pw
             fovea[1] -= ph
+            # in case the fovea localization is out of range
             while (fovea[0] < 0 or fovea[1] < 0 or fovea[0] >= patch_size[0] or fovea[1] >= patch_size[1] ):
                 pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
                 ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
                 fovea[0] = orig_fovea[0] - pw
                 fovea[1] = orig_fovea[1] - ph
+
+            # TODO : is it necessary?
+            # it do the crop to PATCH_SIZE size: default is 1024
             input = input[ph:ph + patch_size[1], pw:pw + patch_size[0], :]
             # print("fovea, orig_fovea, pw, ph, input.shape: ", fovea, orig_fovea, pw, ph, input.shape)
             # print("fovea, pw, ph, input.shape: ", fovea, pw, ph, input.shape)
