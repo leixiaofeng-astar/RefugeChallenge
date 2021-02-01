@@ -6,8 +6,7 @@ Instructions to use:
      TEST.MODEL_FILE output/refuge/fovea_net/refuge/checkpoint_HM1_L7_Aug28.pth
      TEST.RELEASE_TEST False
 
-     python3.7 tools/test.py --cfg experiments/refuge.yaml TEST.MODEL_FILE output/refuge/fovea_net/refuge/model_best.pth
-     cfg.TEST.RELEASE_TEST True
+     python3.7 tools/test.py --cfg experiments/refuge.yaml TEST.MODEL_FILE output/refuge/fovea_net/refuge/model_best.pth TEST.RELEASE_TEST True
 
 description:
     test the model

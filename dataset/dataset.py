@@ -305,7 +305,7 @@ class FoveaDataset(Dataset):
             heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight = \
                 self.generate_target(input, fovea)
 
-            # xiaofeng change
+            # Note: clahe_enaled is disabled in this release
             if self.clahe_enaled:
                 data_numpy = copy.deepcopy(input)
                 b, g, r = cv2.split(data_numpy)
@@ -320,6 +320,7 @@ class FoveaDataset(Dataset):
                                             output_size=2 * self.region_radius, scale=1.0)[0]
             else:
                 # crop ROI
+                # TODO: try to generate 3 different ROI and return
                 input_roi = crop_and_resize(input.unsqueeze(0),
                                             torch.from_numpy(roi_center).unsqueeze(0),
                                             output_size=2*self.region_radius, scale=1.0)[0]
@@ -344,17 +345,20 @@ class FoveaDataset(Dataset):
             return input, meta
 
 
+    # return heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight
+    # TODO: use 3 different size ROI to get features
     def generate_target(self, image, fovea):
         assert self.target_type == 'gaussian', \
             'Only support gaussian map now!'
 
+        # below for coarse stage heatmap
         if self.target_type == 'gaussian':
             if self.is_train:
                 image_size = self.patch_size   # 1024
-                image_ds_size = self.patch_size / self.ds_factor
+                image_ds_size = self.patch_size / self.ds_factor  # 1024/4
             else:
                 image_size = self.crop_size    # 1536
-                image_ds_size = self.crop_size / self.ds_factor
+                image_ds_size = self.crop_size / self.ds_factor   # 1536/4
             image_size = image_size.astype(np.int32)
             image_ds_size = image_ds_size.astype(np.int32)
             heatmap_ds = np.zeros((1,
@@ -414,6 +418,7 @@ class FoveaDataset(Dataset):
             region_size = self.region_radius * 2
             sign_x = 1 if np.random.rand() > 0.5 else -1
             sign_y = 1 if np.random.rand() > 0.5 else -1
+            # ox, oy is the offset in ROI region
             ox = np.random.rand() * offset
             oy = np.random.rand() * offset
             cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_size[0] - 1)
@@ -422,6 +427,7 @@ class FoveaDataset(Dataset):
             cy = (cy * feat_stride[1]).astype(np.int32)
 
             # get fovea location in this ROI
+            # fovea_in_roi coordination is based on small ROI [0,0]->[256,256], such as [128, 128]
             fovea_in_roi = fovea.copy()
             fovea_in_roi[0] -= (cx - self.region_radius)
             fovea_in_roi[1] -= (cy - self.region_radius)

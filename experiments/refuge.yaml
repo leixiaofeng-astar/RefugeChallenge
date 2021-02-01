@@ -99,7 +99,7 @@ MODEL:
 LOSS:
   USE_TARGET_WEIGHT: true
   ROI_WEIGHT: 1.0
-  REGRESS_WEIGHT: 0.1
+  REGRESS_WEIGHT: 0.0
 TRAIN:
   BATCH_SIZE_PER_GPU: 4
   SHUFFLE: true 
@@ -120,7 +120,7 @@ TRAIN:
   FULL_DATA: false
   EFF_NET: false
   HRNET_ONLY: false
-  ORIG_STEMNET: true
+  ORIG_STEMNET: false
   DATA_CLAHE: false
   ROI_CLAHE: false
   MV_IDEA: false

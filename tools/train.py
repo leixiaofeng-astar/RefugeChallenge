@@ -9,6 +9,7 @@ Instructions to use:
     TRAIN.END_EPOCH 500
     TRAIN.LR_STEP [100, 160]
     LOSS.ROI_WEIGHT 0.8
+    MODEL.REGION_RADIUS 256
     TEST.MODEL_FILE output/refuge/fovea_net/refuge/checkpoint_HM1_L7_Aug28.pth
 
     python3.7 tools/train.py --cfg experiments/refuge.yaml TRAIN.LR 0.002 TRAIN.LR_STEP '[100, 160]' TRAIN.END_EPOCH 200

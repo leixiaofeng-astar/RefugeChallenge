@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+
 import cv2
 import copy
 import numpy as np
@@ -17,6 +18,7 @@ import numpy as np
 from core.inference import get_max_preds, get_heatmap_center_preds
 from utils.transforms import crop_and_resize
 from efficientnet.model import EfficientNet
+
 
 BN_MOMENTUM = 0.1
 logger = logging.getLogger(__name__)
@@ -38,24 +40,112 @@ class ResNet18(nn.Module):
         resnet = models.resnet18(pretrained=True)
         self.features = nn.Sequential(*list(resnet.children())[:-1])
         self.fc = nn.Linear(in_features=resnet.fc.in_features, out_features=num_class)
-        # xiaofeng modify it
-        '''
-        self.fc = nn.Sequential(
-            nn.Linear(in_features=resnet.fc.in_features, out_features=256),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(256, out_features=num_class),  # 2 possible outputs in this case
-            # nn.LogSoftmax(dim=1)  # For using NLLLoss()
-        )
-        '''
 
     def forward(self, x):
         """Extract multiple convolutional feature maps."""
         features = self.features(x).view(x.shape[0], -1)
-        out = torch.sigmoid(self.fc(features))
-        out1 = torch.softmax(self.fc(features), dim=1)
-        #return features, out
-        return features, out, out1
+        # out = torch.sigmoid(self.fc(features))
+        # out1 = torch.softmax(self.fc(features), dim=1)
+        return features
+        # return features, out, out1
+
+"""
+ResNet34 + U-Net
+"""
+class expansive_block(nn.Module):
+    def __init__(self, in_channels, mid_channels, out_channels):
+        super(expansive_block, self).__init__()
+
+        self.block = nn.Sequential(
+            nn.Conv2d(kernel_size=(3, 3), in_channels=in_channels, out_channels=mid_channels, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(mid_channels),
+            nn.Conv2d(kernel_size=(3, 3), in_channels=mid_channels, out_channels=out_channels, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(out_channels)
+        )
+
+    def forward(self, d, e=None):
+        d = F.interpolate(d, scale_factor=2, mode='bilinear', align_corners=True)
+        # concat
+
+        if e is not None:
+            cat = torch.cat([e, d], dim=1)
+            out = self.block(cat)
+        else:
+            out = self.block(d)
+        return out
+
+
+def final_block(in_channels, out_channels):
+    block = nn.Sequential(
+        nn.Conv2d(kernel_size=(3, 3), in_channels=in_channels, out_channels=out_channels, padding=1),
+        nn.ReLU(),
+        nn.BatchNorm2d(out_channels),
+    )
+    return block
+
+
+class Resnet34_Unet(nn.Module):
+
+    def __init__(self, in_channel, out_channel, pretrained=False):
+        super(Resnet34_Unet, self).__init__()
+
+        self.resnet = models.resnet34(pretrained=pretrained)
+        self.layer0 = nn.Sequential(
+            self.resnet.conv1,
+            self.resnet.bn1,
+            self.resnet.relu,
+            # disable layer0 pool to keep size same
+            self.resnet.maxpool
+        )
+
+        # Encode
+        self.layer1 = self.resnet.layer1
+        self.layer2 = self.resnet.layer2
+        self.layer3 = self.resnet.layer3
+        self.layer4 = self.resnet.layer4
+
+        # Bottleneck
+        self.bottleneck = torch.nn.Sequential(
+            nn.Conv2d(kernel_size=(3, 3), in_channels=512, out_channels=1024, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(1024),
+            nn.Conv2d(kernel_size=(3, 3), in_channels=1024, out_channels=1024, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(1024),
+            nn.MaxPool2d(kernel_size=(2, 2), stride=2)
+        )
+
+        # Decode
+        self.conv_decode4 = expansive_block(1024+512, 512, 512)
+        self.conv_decode3 = expansive_block(512+256, 256, 256)
+        self.conv_decode2 = expansive_block(256+128, 128, 128)
+        self.conv_decode1 = expansive_block(128+64, 64, 64)
+        self.conv_decode0 = expansive_block(64, 32, 32)
+        self.final_layer = final_block(32, out_channel)
+
+    def forward(self, x):
+        x = self.layer0(x)
+        # Encode
+        encode_block1 = self.layer1(x)
+        encode_block2 = self.layer2(encode_block1)
+        encode_block3 = self.layer3(encode_block2)
+        encode_block4 = self.layer4(encode_block3)
+
+        # Bottleneck
+        bottleneck = self.bottleneck(encode_block4)
+
+        # Decode
+        decode_block4 = self.conv_decode4(bottleneck, encode_block4)
+        decode_block3 = self.conv_decode3(decode_block4, encode_block3)
+        decode_block2 = self.conv_decode2(decode_block3, encode_block2)
+        decode_block1 = self.conv_decode1(decode_block2, encode_block1)
+        decode_block0 = self.conv_decode0(decode_block1)
+
+        final_layer = self.final_layer(decode_block0)
+
+        return final_layer
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -554,13 +644,20 @@ class FoveaNet(nn.Module):
         super(FoveaNet, self).__init__()
         self.cfg = cfg
         self.hrnet = get_hrnet(cfg, is_train=False, **kwargs)
+        # xiaofeng: add to replace stemNet -- test only
+        # self.resnet = ResNet18()
+        self.Resnet34_Unet = Resnet34_Unet(in_channel=3, out_channel=16, pretrained=True)
+        self.subpixel_up_by8 = nn.PixelShuffle(8)
         self.subpixel_up_by4 = nn.PixelShuffle(4)
         self.subpixel_up_by2 = nn.PixelShuffle(2)
         self.heatmap_ds = nn.Sequential(
             nn.Conv2d(16, 1, kernel_size=1, padding=0)
         )
         self.hrnet_only = cfg.TRAIN.HRNET_ONLY
-        self.one_heatmap_channel = False
+        self.add_heatmap_channel = False
+        self.image_channel = 3
+        if self.add_heatmap_channel:
+            self.image_channel += 1
         # stem net
         # self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1,
         #                        bias=False)
@@ -573,119 +670,18 @@ class FoveaNet(nn.Module):
         # self.bn3 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         # self.relu = nn.ReLU(inplace=True)
         self.orig_stemnet = cfg.TRAIN.ORIG_STEMNET
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(self.image_channel, 64, kernel_size=3, stride=2, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
 
         # xf add it
         if self.cfg.TRAIN.MV_IDEA:
-            self.conv1_1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2, bias=False)
+            self.conv1_1 = nn.Conv2d(self.image_channel, 64, kernel_size=5, stride=1, padding=2, bias=False)
             self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False)
             self.bn3 = nn.BatchNorm2d(64)
 
         self.relu = nn.ReLU(inplace=True)
-        
-        # xiaofeng add for efficientnet
-        if self.cfg.TRAIN.EFF_NET:
-            from efficientnet.model import EfficientNet
-            self.backbone_type = 'eff-b4'  # resnet34, resnet50, efficientnet-b0~b4
-            self.bb_feat_dims = bb2feat_dims[self.backbone_type]
-            # Set in_fpn_scheme and out_fpn_scheme to 'NA' and 'NA', respectively.
-            # NA: normalize first, then add. AN: add first, then normalize.
-            # self.set_fpn_layers('34', '1234', 'AN', 'AN', 'default')
-            self.set_fpn_layers('34', '234', 'AN', 'AN', 'default')
-            self.fpn_interp_mode = 'bilinear'  # nearest, bilinear. Using 'nearest' causes significant degradation.
-            self.eff_feat_upsize = True  # Configure efficient net to generate x2 feature maps.
-            self.in_fpn_use_bn = False  # If in FPN uses BN, it performs slightly worse than using GN.
-            self.out_fpn_use_bn = False  # If out FPN uses BN, it performs worse than using GN.
-            self.resnet_bn_to_gn = False  # Converting resnet BN to GN reduces performance.
-            self.align_corners = None if self.fpn_interp_mode == 'nearest' else False
-            self.G = 8
-            self.cut_zeros = False
-            self.output_scaleup = 1.0
-            self.num_classes = 1   # for localization
-            # Randomness settings
-            self.hidden_dropout_prob = 0.2
-            self.attention_probs_dropout_prob = 0.2
-            self.out_fpn_do_dropout = False
-            backbone_type = self.backbone_type.replace("eff", "efficientnet")
-            stem_stride = 1 if self.eff_feat_upsize else 2
-            self.backbone = EfficientNet.from_pretrained(backbone_type, advprop=True, stem_stride=stem_stride)
-            print("%s created (stem stride %d)" % (backbone_type, stem_stride))
-            self.backbone = EfficientNet.from_pretrained(backbone_type, advprop=True, stem_stride=stem_stride)
-            if 2 in self.in_fpn_layers:
-                self.mask_pool = nn.AvgPool2d((4, 4))
-            elif 3 in self.in_fpn_layers:
-                self.mask_pool = nn.AvgPool2d((8, 8))
-            else:
-                self.mask_pool = nn.AvgPool2d((16, 16))
-
-            self.in_fpn23_conv = nn.Conv2d(self.bb_feat_dims[2], self.bb_feat_dims[3], 1)
-            self.in_fpn34_conv = nn.Conv2d(self.bb_feat_dims[3], self.bb_feat_dims[4], 1)
-
-            # in_bn4b/in_gn4b normalizes in_fpn43_conv(layer 4 features),
-            # so the feature dim = dim of layer 3.
-            # in_bn3b/in_gn3b normalizes in_fpn32_conv(layer 3 features),
-            # so the feature dim = dim of layer 2.
-            if self.in_fpn_use_bn:
-                self.in_bn3b = nn.BatchNorm2d(self.bb_feat_dims[3])
-                self.in_bn4b = nn.BatchNorm2d(self.bb_feat_dims[4])
-                self.in_fpn_norms = [None, None, None, self.in_bn3b, self.in_bn4b]
-            else:
-                self.in_gn3b = nn.GroupNorm(self.G, self.bb_feat_dims[3])
-                self.in_gn4b = nn.GroupNorm(self.G, self.bb_feat_dims[4])
-                self.in_fpn_norms = [None, None, None, self.in_gn3b, self.in_gn4b]
-
-            self.in_fpn_convs = [None, None, self.in_fpn23_conv, self.in_fpn34_conv]
-            if self.out_fpn_layers != self.in_fpn_layers:
-                self.do_out_fpn = True
-                self.out_fpn12_conv = nn.Conv2d(self.bb_feat_dims[1],
-                                                self.bb_feat_dims[2], 1)
-                self.out_fpn23_conv = nn.Conv2d(self.bb_feat_dims[2],
-                                                self.bb_feat_dims[3], 1)
-                self.out_fpn34_conv = nn.Conv2d(self.bb_feat_dims[3],
-                                                self.bb_feat_dims[4], 1)
-                # last_out_fpn_layer = 3 here, 160 --> 1792
-                last_out_fpn_layer = self.out_fpn_layers[-len(self.in_fpn_layers)]
-                self.out_bridgeconv = nn.Conv2d(self.bb_feat_dims[last_out_fpn_layer],
-                                                self.feat_dim, 1)
-                print("out_bridgeconv (last_out_fpn_layer %d, conv: %d --> %d)" \
-                      % (last_out_fpn_layer, self.bb_feat_dims[last_out_fpn_layer], self.feat_dim))
-
-                # out_bn3b/out_gn3b normalizes out_fpn23_conv(layer 3 features),
-                # so the feature dim = dim of layer 2.
-                # out_bn2b/out_gn2b normalizes out_fpn12_conv(layer 2 features),
-                # so the feature dim = dim of layer 1.
-                if self.out_fpn_use_bn:
-                    self.out_bn2b = nn.BatchNorm2d(self.bb_feat_dims[2])
-                    self.out_bn3b = nn.BatchNorm2d(self.bb_feat_dims[3])
-                    self.out_bn4b = nn.BatchNorm2d(self.bb_feat_dims[4])
-                    self.out_fpn_norms = [None, None, self.out_bn2b, self.out_bn3b, self.out_bn4b]
-                else:
-                    self.out_gn2b = nn.GroupNorm(self.G, self.bb_feat_dims[2])
-                    self.out_gn3b = nn.GroupNorm(self.G, self.bb_feat_dims[3])
-                    self.out_gn4b = nn.GroupNorm(self.G, self.bb_feat_dims[4])
-                    self.out_fpn_norms = [None, None, self.out_gn2b, self.out_gn3b, self.out_gn4b]
-
-                self.out_fpn_convs = [None, self.out_fpn12_conv, self.out_fpn23_conv, self.out_fpn34_conv]
-                self.out_conv = nn.Conv2d(self.out_feat_dim, self.num_classes, 1)
-                self.out_fpn_dropout = nn.Dropout(self.hidden_dropout_prob)
-
-                # xiaofeng add
-                self.roi_gn = nn.GroupNorm(self.G, self.bb_feat_dims[4])
-            # out_fpn_layers = in_fpn_layers, no need to do fpn at the output end.
-            # Output class scores directly.
-            else:
-                self.do_out_fpn = False
-                if '2' in self.in_fpn_layers:
-                    # Output resolution is 1/4 of input already. No need to do upsampling here.
-                    self.out_conv = nn.Conv2d(self.feat_dim, self.num_classes, 1)
-                else:
-                    # Output resolution is 1/8 of input. Do upsampling to make resolution x 2
-                    self.out_conv = nn.ConvTranspose2d(self.feat_dim, self.num_classes, 2, 2)
-
-        # end: xiaofeng add for efficientnet
 
         # fusion layer
         self.convf = nn.Conv2d(16 + 16, 32, kernel_size=3, stride=1, padding=1, bias=False)
@@ -934,6 +930,7 @@ class FoveaNet(nn.Module):
                 roi_center *= ds_factor
                 roi_center = roi_center.cuda(non_blocking=True)
                 input_roi = crop_and_resize(input, roi_center, region_size)
+                # TODO: we could generate 3 different ROI here
                 meta.update(
                     {'roi_center': roi_center.cpu(),
                      'input_roi': input_roi.cpu()
@@ -942,139 +939,89 @@ class FoveaNet(nn.Module):
                 assert 'roi_center' in meta.keys()
                 roi_center = meta['roi_center'].cuda(non_blocking=True)
 
-            if self.cfg.TRAIN.EFF_NET:
-                # TODO -- xiaofeng change for efficient Net
-                # resize to 3x224x224, changre REGION_RADIUS from 128 to 112
-                # batch = cv2.resize(input_roi, dsize=(224, 224), interpolation=cv2.INTER_LINEAR)
-                batch = input_roi
-                MOD = 0
-                B0 = batch.shape[0]
-                B, C, H, W = batch.shape
+            if self.add_heatmap_channel:
+                heatmap_2_roilayer = crop_and_resize(heatmap_ds_pred, roi_center/ds_factor, region_size, scale=1. / ds_factor)
+                # TODO: add to input_roi
+                input_roi = torch.stack([input_roi, heatmap_2_roilayer], dim=1)
 
-                with torch.no_grad():
-                    # nonzero_mask: if '3': [40, 14, 14]; if '2': [40, 28, 28].
-                    nonzero_mask = self.get_mask(batch)
-
-                if self.backbone_type.startswith('resnet'):
-                    batch_base_feats = self.backbone.ext_features(batch)
-                elif self.backbone_type.startswith('eff'):
-                    feats_dict = self.backbone.extract_endpoints(batch)
-                    #                       [40, 16, 128, 128],        [40, 24, 64, 64]
-                    batch_base_feats = (feats_dict['reduction_1'], feats_dict['reduction_2'], \
-                                        #                       [40, 40, 32, 32],          [40, 112, 16, 16],       [40, 1280, 8, 8]
-                                        feats_dict['reduction_3'], feats_dict['reduction_4'], feats_dict['reduction_5'])
-
-
-                # vfeat_fpn: [B (B0*MOD), 3920, 256] / vfeat_fpn.shape = torch.Size([4, 784, 1792])
-                vfeat_fpn, vmask, H2, W2 = self.in_fpn_forward(batch_base_feats, nonzero_mask, B)
-
-                # if self.in_fpn_layers == '234', xy_shape = (28, 28)
-                # if self.in_fpn_layers == '34',  xy_shape = (14, 14)
-                xy_shape = torch.Size((H2, W2))
-                # xy_indices: [14, 14, 20, 3]
-                xy_indices = get_all_indices(xy_shape)
-                scale_H = H // H2
-                scale_W = W // W2
-
-                # Has to be exactly divided.
-                if (scale_H * H2 != H) or (scale_W * W2 != W):
-                    import pdb
-                    pdb.set_trace()
-
-                scale = torch.tensor([[scale_H, scale_W]], device='cuda')
-
-                # TODO
-                vfeat_fused_fpn = self.xf_out_fpn_heatmap(batch_base_feats)
-                # curr_feat:            [B, 1792, 56, 56]   / XF: [4, 160, 112, 112]
-                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
-
-                # curr_feat:            XF: 3: [4, 160, 28, 28]
-                # batch_base_feats[-1]: [B, 1792, 7, 7]     / XF: [4, 1792, 112, 112]
-                # curr_feat = batch_base_feats[3]
-                # vfeat_fused_fpn = self.out_bridgeconv(curr_feat) + F.interpolate(batch_base_feats[-1],
-                #                                                               size=curr_feat.shape[2:],
-                #                                                               mode=self.fpn_interp_mode,
-                #                                                               align_corners=self.align_corners)
-
-                # 1792 channel [B, 1792, 112, 112] --> 1 channel [B, 1, 112, 112]
-                trans_scores_small = self.out_conv(vfeat_fused_fpn)
-
-                out_size = [int(H * self.output_scaleup), int(W * self.output_scaleup)]
-                # full_scores: [B0, 2, 112, 112] / XF: trans_scores_up = [B, 1, 224, 224]
-                trans_scores_up = F.interpolate(trans_scores_small, size=out_size,
-                                                mode='bilinear', align_corners=False)
+            # (batch, 16, 256, 256)
+            # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
+            if self.cfg.TRAIN.ROI_CLAHE:
+                B, C, H, W = input_roi.shape
+                # xiaofeng add for test
                 # import pdb
                 # pdb.set_trace()
-                heatmap_roi_pred = trans_scores_up
-                # xiaofeng: try to generate feat for regression task for fun
-                roi_feats = self.relu(self.roi_gn(vfeat_fused_fpn))
+                data_numpy = copy.deepcopy(input_roi)
+                data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
+                for i in range(B):
+                    img = data_numpy.numpy()[i,:,:,:].astype('uint8')
+                    # print("clahe: ", img.shape)
+                    b, g, r = cv2.split(img)
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                    b = clahe.apply(b)
+                    g = clahe.apply(g)
+                    r = clahe.apply(r)
+                    img = cv2.merge([b, g, r])
+                    data_numpy[i,:,:,:] = torch.from_numpy(img)
+                    # print("after clahe: ", img.shape)
+                data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
 
-            else:
-                # (batch, 16, 256, 256)
-                # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
-                if self.cfg.TRAIN.ROI_CLAHE:
-                    B, C, H, W = input_roi.shape
-                    # xiaofeng add for test
-                    # import pdb
-                    # pdb.set_trace()
-                    data_numpy = copy.deepcopy(input_roi)
-                    data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
-                    for i in range(B):
-                        img = data_numpy.numpy()[i,:,:,:].astype('uint8')
-                        # print("clahe: ", img.shape)
-                        b, g, r = cv2.split(img)
-                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-                        b = clahe.apply(b)
-                        g = clahe.apply(g)
-                        r = clahe.apply(r)
-                        img = cv2.merge([b, g, r])
-                        data_numpy[i,:,:,:] = torch.from_numpy(img)
-                        # print("after clahe: ", img.shape)
-                    data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
-
-                    if self.cfg.TRAIN.MV_IDEA:
-                        if self.orig_stemnet:
-                            roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
-                        else:
-                            roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
-                    else:
-                        roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
-                else:
-                    if self.cfg.TRAIN.MV_IDEA:
-                        if self.orig_stemnet:
-                            roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))
-                        else:
-                            roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
-                    else:
-                        roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
-
-
-                roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
-                # xiaofeng add for k=3 layer for ROI
                 if self.cfg.TRAIN.MV_IDEA:
-                    if not self.orig_stemnet:
-                        roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+                    if self.orig_stemnet:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
+                    else:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
+                else:
+                    roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
+                roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+            else:
+                if self.cfg.TRAIN.MV_IDEA:
+                    if self.orig_stemnet:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))
+                    else:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
+                    roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+                else:
+                    if self.orig_stemnet:
+                        roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
+                        roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+                    else:
+                        # roi_feats_hr = self.resnet(input_roi)    # (batch, 512, 8, 8)
+                        roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16, 128, 128)
+                        roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear")
 
+            # xiaofeng add for k=3 layer for ROI
+            if self.cfg.TRAIN.MV_IDEA:
+                if not self.orig_stemnet:
+                    roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+
+            if self.orig_stemnet:
                 roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
+            else:
+                # Note: this is to test the stemNet replacing performance
+                # for resnet only
+                # roi_feats_hr = self.subpixel_up_by4(roi_feats_hr)             # (batch, 16, 32, 32)
+                # TODO: for Resnet34_Unet
+                # roi_feats_hr = crop_and_resize(roi_feats_hr, roi_center, region_size, scale=1.0)
+                pass
 
                 # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
-                # crop_and_resize(image, center, output_size, scale=1)
-                roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
+            # crop_and_resize(image, center, output_size, scale=1)
+            roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
 
-                # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
-                # test for the effect of feature fusion
-                remove_hr_feature = True
-                if remove_hr_feature:
-                    # TODO -- if we don't use HRNET feature, we don't concat the feature
-                    roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))
-                    # TODO -- if we don't use HRNET feature, we don't concat the feature
-                else:
-                    roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
-                    roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+            # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
+            # test for the effect of feature fusion
+            remove_hr_feature = False
+            if remove_hr_feature:
+                # discard ROI feature to verify refine stage performance, we don't concat the feature
+                roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))
+                # end of discard ROI feature
+            else:
+                roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)
+                roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
 
-
-                # 32 channel --> 1 channel  (batch, 1, 256, 256)
-                heatmap_roi_pred = self.heatmap_roi(roi_feats)
+            # 32 channel --> 1 channel  (batch, 1, 256, 256)
+            heatmap_roi_pred = self.heatmap_roi(roi_feats)
 
             if infer_roi:
                 # Get initial location from heatmap
