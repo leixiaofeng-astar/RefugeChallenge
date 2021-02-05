@@ -309,28 +309,28 @@ def main():
             }, best_model, final_output_dir)
             model = model.cuda()
 
-            print("saving spent time:")
-            end_time = timer(val_time)  # timing ends here for "start_time" variable
-        elif (epoch % 60 == 0) and (epoch != 0):
-            logger.info('=> saving epoch {} checkpoint to {}'.format(epoch, final_output_dir))
-            # transfer the model to CPU before saving to fix unstable bug:
-            # github.com/pytorch/pytorch/issues/10577
-
-            time_str = time.strftime('%Y-%m-%d-%H-%M')
-            if cfg.TRAIN.HRNET_ONLY:
-                checkpoint_filename = 'checkpoint_HRNET_epoch%d_%s.pth' % (epoch, time_str)
-            else:
-                checkpoint_filename = 'checkpoint_Hybrid_epoch%d_%s.pth' % (epoch, time_str)
-            model = model.cpu()
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'model': cfg.MODEL.NAME,
-                'state_dict': model.state_dict(),
-                'best_state_dict': model.module.state_dict(),
-                'metric': final_metric,
-                'optimizer': optimizer.state_dict(),
-            }, best_model, final_output_dir, checkpoint_filename)
-            model = model.cuda()
+            # print("saving spent time:")
+            # end_time = timer(val_time)  # timing ends here for "start_time" variable
+        # elif (epoch % 60 == 0) and (epoch != 0):
+        #     logger.info('=> saving epoch {} checkpoint to {}'.format(epoch, final_output_dir))
+        #     # transfer the model to CPU before saving to fix unstable bug:
+        #     # github.com/pytorch/pytorch/issues/10577
+        #
+        #     time_str = time.strftime('%Y-%m-%d-%H-%M')
+        #     if cfg.TRAIN.HRNET_ONLY:
+        #         checkpoint_filename = 'checkpoint_HRNET_epoch%d_%s.pth' % (epoch, time_str)
+        #     else:
+        #         checkpoint_filename = 'checkpoint_Hybrid_epoch%d_%s.pth' % (epoch, time_str)
+        #     model = model.cpu()
+        #     save_checkpoint({
+        #         'epoch': epoch + 1,
+        #         'model': cfg.MODEL.NAME,
+        #         'state_dict': model.state_dict(),
+        #         'best_state_dict': model.module.state_dict(),
+        #         'metric': final_metric,
+        #         'optimizer': optimizer.state_dict(),
+        #     }, best_model, final_output_dir, checkpoint_filename)
+        #     model = model.cuda()
 
     # xiaofeng change
     time_str = time.strftime('%Y-%m-%d-%H-%M')

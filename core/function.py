@@ -73,6 +73,9 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
         end = time.time()
 
         if i % config.PRINT_FREQ == 0:
+            # Epoch: [29][20/80]      Time 1.109s (1.171s)    Speed 7.2 samples/s
+            # Data 0.000s (0.066s)    Loss 0.0003522 (0.0003718)
+            # -- Losses 0.0000344 (0.0000428), 0.0003178 (0.0003291), 0.0000000 (0.000000)
             msg = 'Epoch: [{0}][{1}/{2}]\t' \
                   'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
                   'Speed {speed:.1f} samples/s\t' \
@@ -88,6 +91,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
                       heatmap_roi_loss=heatmap_roi_losses, offset_loss=offset_losses)
             logger.info(msg)
 
+            # comment it for speeding
             writer = writer_dict['writer']
             global_steps = writer_dict['train_global_steps']
             writer.add_scalar('train_loss', losses.val, global_steps)
@@ -252,8 +256,10 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             hr_init_avg_l2_dist += hr_tmp_avg_l2_dist
             final_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_final_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=output_dir)
             final_avg_l2_dist += final_tmp_avg_l2_dist
-            logger.info('Dataset %d Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' % (
-                sum_db, lr_tmp_avg_l2_dist, hr_tmp_avg_l2_dist, final_tmp_avg_l2_dist))
+            # logger.info('Dataset %d Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' % (
+            #     sum_db, lr_tmp_avg_l2_dist, hr_tmp_avg_l2_dist, final_tmp_avg_l2_dist))
+            logger.info('Dataset %d Average L2 Distance on test set: lr_L2 = %.2f, hr_L2 = %.2f' % (
+                    sum_db, lr_tmp_avg_l2_dist, hr_tmp_avg_l2_dist))
         if sum_db == 0:
             sum_db = 1
         lr_init_avg_l2_dist /= sum_db
@@ -264,8 +270,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
         hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir='./log', debug_enable=debug_all)
         final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
 
-    logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
-        lr_init_avg_l2_dist, hr_init_avg_l2_dist, final_avg_l2_dist))
+    # logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
+    #     lr_init_avg_l2_dist, hr_init_avg_l2_dist, final_avg_l2_dist))
+    logger.info('Average L2 Distance on test set: lr_L2 = %.2f, hr_L2 = %.2f' %(lr_init_avg_l2_dist, hr_init_avg_l2_dist))
 
     return lr_init_dists.avg, hr_init_dists.avg, final_dists.avg
 
