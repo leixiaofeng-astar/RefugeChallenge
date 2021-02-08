@@ -58,11 +58,14 @@ class Dataset(FoveaDataset):
             return False
 
     def _get_db(self, image_set):
-
+        TRAIN_AGE_MODEL = True
         if image_set == 'train':
             # training images and labels
-            train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
-                                               'Annotation-Training400', 'Fovea_location.xlsx')
+            if TRAIN_AGE_MODEL:
+                train_anno_filename = os.path.join(self.root, 'AGE-train-GT', 'Train_Fovea_locations_AGE.csv')
+            else:
+                train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
+                                                   'Annotation-Training400', 'Fovea_location.xlsx')
             workbook = load_workbook(train_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -74,12 +77,15 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=3).value) - 1
                 fy = float(booksheet.cell(row=i, column=4).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                if fname[0] == 'n':
-                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Non-Glaucoma', fname)
-                elif fname[0] == 'g':
-                    image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
+                if TRAIN_AGE_MODEL:
+                    image_file = os.path.join(self.root, 'AGE-train', fname)
                 else:
-                    assert False, 'unkown entry: %s' % (fname)
+                    if fname[0] == 'n':
+                        image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Non-Glaucoma', fname)
+                    elif fname[0] == 'g':
+                        image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
+                    else:
+                        assert False, 'unkown entry: %s' % (fname)
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
@@ -91,12 +97,16 @@ class Dataset(FoveaDataset):
             return train_db
         elif image_set == 'test':
             # test images and labels
-            make_sample_gt = False
-            if make_sample_gt:
-                test_anno_filename = os.path.join(self.root, 'test-GT', 'test_Fovea_locations.xlsx')
+            # TODO
+            if TRAIN_AGE_MODEL:
+                test_anno_filename = os.path.join(self.root, 'AGE-test-GT', 'test_Fovea_locations_AGE.csv')
             else:
-                # test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
-                test_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Val.xlsx')
+                make_sample_gt = False
+                if make_sample_gt:
+                    test_anno_filename = os.path.join(self.root, 'test-GT', 'test_Fovea_locations.xlsx')
+                else:
+                    # test_anno_filename = os.path.join(self.root, 'REFUGE-Test-GT', 'Glaucoma_label_and_Fovea_location.xlsx')
+                    test_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Val.xlsx')
             workbook = load_workbook(test_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -108,12 +118,16 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=4).value) - 1
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                if make_sample_gt:
-                    image_file = os.path.join(self.root, 'test_img', fname)
+
+                if TRAIN_AGE_MODEL:
+                    image_file = os.path.join(self.root, 'AGE-test', fname)
                 else:
-                    # image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
-                    image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Val', fname)
-                if not self.is_image_file(image_file): continue
+                    if make_sample_gt:
+                        image_file = os.path.join(self.root, 'test_img', fname)
+                    else:
+                        # image_file = os.path.join(self.root, 'REFUGE-Test400', 'Test400', fname)
+                        image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Val', fname)
+                    if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
                 test_db.append({
@@ -124,7 +138,12 @@ class Dataset(FoveaDataset):
             return test_db
         elif image_set == 'val':
             # validation images and labels
-            val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Train.xlsx')
+            # TODO
+            if TRAIN_AGE_MODEL:
+                val_anno_filename = os.path.join(self.root, 'AGE-val-GT', 'val_Fovea_locations_AGE.csv')
+            else:
+                val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Train.xlsx')
+
             workbook = load_workbook(val_anno_filename)
             booksheet = workbook.active
             rows = booksheet.rows
@@ -136,7 +155,10 @@ class Dataset(FoveaDataset):
                 fx = float(booksheet.cell(row=i, column=4).value) - 1
                 fy = float(booksheet.cell(row=i, column=5).value) - 1
                 fname = booksheet.cell(row=i, column=2).value
-                image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Train', fname)
+                if TRAIN_AGE_MODEL:
+                    image_file = os.path.join(self.root, 'AGE-val', fname)
+                else:
+                    image_file = os.path.join(self.root, 'REFUGE-Validation400', 'REFUGE-Val2Train', fname)
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)

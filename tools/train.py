@@ -150,73 +150,115 @@ def main():
     db_trains = []
     db_vals = []
 
-    # final_full_test is to use all 1200 images in training, default = False
-    final_full_test = cfg.TRAIN.FULL_DATA
-    normalize_1 = transforms.Normalize(
-        mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
-    )
-    train_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, True,
-        transforms.Compose([
-            transforms.ToTensor(),
-            normalize_1,
-        ])
-    )
-    db_trains.append(train_dataset_1)
+    TRAIN_AGE_MODEL = True
+    if TRAIN_AGE_MODEL:
+        # AGE challenge
+        normalize = transforms.Normalize(
+            mean=[0.070, 0.072, 0.153], std=[0.128, 0.128, 0.139]
+        )
+        train_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, True,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        val_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
 
-    normalize_2 = transforms.Normalize(
-        # mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
-        # the 240 images from val set
-        mean = [0.413, 0.273, 0.217], std = [0.289, 0.204, 0.161]
+        train_batch_size = cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=train_batch_size,
+            shuffle=cfg.TRAIN.SHUFFLE,
+            num_workers=cfg.WORKERS,
+            pin_memory=cfg.PIN_MEMORY
+        )
 
-    )
-    train_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, True,
-        transforms.Compose([
-            transforms.ToTensor(),
-            normalize_2,
-        ])
-    )
-    db_trains.append(train_dataset_2)
+        logger.info("Val Dataset: Total {} images".format(len(val_dataset)))
+        test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
+        valid_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
+            shuffle=False,
+            num_workers=cfg.WORKERS,
+            pin_memory=cfg.PIN_MEMORY
+        )
 
-    train_dataset = ConcatDataset(db_trains)
-    logger.info("Combined Dataset: Total {} images".format(len(train_dataset)))
+    else:
+        # refuge2 challenge
+        # final_full_test is to use all 1200 images in training, default = False
+        final_full_test = cfg.TRAIN.FULL_DATA
+        normalize_1 = transforms.Normalize(
+            mean=[0.282, 0.168, 0.084], std=[0.189, 0.110, 0.062]
+        )
+        train_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_1, True,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize_1,
+            ])
+        )
+        db_trains.append(train_dataset_1)
 
-    train_batch_size = cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=train_batch_size,
-        shuffle=cfg.TRAIN.SHUFFLE,
-        num_workers=cfg.WORKERS,
-        pin_memory=cfg.PIN_MEMORY
-    )
+        normalize_2 = transforms.Normalize(
+            # mean = [0.409, 0.270, 0.215], std = [0.288, 0.203, 0.160]
+            # the 240 images from val set
+            mean = [0.413, 0.273, 0.217], std = [0.289, 0.204, 0.161]
 
-    normalize = transforms.Normalize(
-        # mean=[0.404, 0.271, 0.222], std=[0.284, 0.202, 0.163]
-        # 160 images from refuge1 val
-        mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
-    )
-    val_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-        cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
-        transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
-    db_vals.append(val_dataset_1)
+        )
+        train_dataset_2 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, True,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize_2,
+            ])
+        )
+        db_trains.append(train_dataset_2)
 
-    valid_dataset = ConcatDataset(db_vals)
+        train_dataset = ConcatDataset(db_trains)
+        logger.info("Combined Dataset: Total {} images".format(len(train_dataset)))
 
-    logger.info("Val Dataset: Total {} images".format(len(valid_dataset)))
+        train_batch_size = cfg.TRAIN.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=train_batch_size,
+            shuffle=cfg.TRAIN.SHUFFLE,
+            num_workers=cfg.WORKERS,
+            pin_memory=cfg.PIN_MEMORY
+        )
 
-    test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
-    valid_loader = torch.utils.data.DataLoader(
-        valid_dataset,
-        batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
-        shuffle=False,
-        num_workers=cfg.WORKERS,
-        pin_memory=cfg.PIN_MEMORY
-    )
+        normalize = transforms.Normalize(
+            # mean=[0.404, 0.271, 0.222], std=[0.284, 0.202, 0.163]
+            # 160 images from refuge1 val
+            mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
+        )
+        val_dataset_1 = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+            cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        db_vals.append(val_dataset_1)
+
+        valid_dataset = ConcatDataset(db_vals)
+
+        logger.info("Val Dataset: Total {} images".format(len(valid_dataset)))
+
+        test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
+        valid_loader = torch.utils.data.DataLoader(
+            valid_dataset,
+            batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
+            shuffle=False,
+            num_workers=cfg.WORKERS,
+            pin_memory=cfg.PIN_MEMORY
+        )
 
     logger.info("Train len: {}, batch_size: {}; Test len: {}, batch_size: {}" \
                 .format(len(train_loader), train_batch_size, len(valid_loader), test_batch_size))

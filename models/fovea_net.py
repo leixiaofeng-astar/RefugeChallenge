@@ -765,6 +765,7 @@ class FoveaNet(nn.Module):
             raise ValueError('{} is not exist!'.format(pretrained))
 
     def forward(self, input, meta, input_roi=None):
+        remove_hr_feature = True
         infer_roi = input_roi is None
         ds_factor = self.cfg.MODEL.DS_FACTOR
 
@@ -845,8 +846,10 @@ class FoveaNet(nn.Module):
                     roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
                 else:
                     # roi_feats_hr = self.resnet(input_roi)    # (batch, 512, 8, 8)
-                    roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16, 128, 128)
-                    roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear") # (batch, 16, 256, 256)
+                    # don't apply Resnet34_Unet if remove_hr_feature
+                    if not remove_hr_feature:
+                        roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16, 128, 128)
+                        roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear") # (batch, 16, 256, 256)
 
             # xiaofeng add for k=3 layer for ROI
             if self.cfg.TRAIN.MV_IDEA:
@@ -875,7 +878,6 @@ class FoveaNet(nn.Module):
 
             # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
             # fusion layer
-            remove_hr_feature = False
             if remove_hr_feature:
                 # discard ROI feature to verify refine stage performance, we don't concat the feature
                 roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))

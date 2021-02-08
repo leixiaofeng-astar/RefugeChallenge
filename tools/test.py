@@ -170,15 +170,12 @@ def main():
         use_target_weight=cfg.LOSS.USE_TARGET_WEIGHT).cuda()
 
     # Data loading code
-    release_result = cfg.TEST.RELEASE_TEST
-    if release_result is False:
+    TRAIN_AGE_MODEL = True
+    if TRAIN_AGE_MODEL:
         normalize = transforms.Normalize(
-            # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
-            # mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
-            # 160 images from refuge1 val
-            mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
+            mean=[0.070, 0.071, 0.152], std=[0.127, 0.127, 0.138]
         )
-        valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
+        valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
             cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
             transforms.Compose([
                 transforms.ToTensor(),
@@ -186,26 +183,42 @@ def main():
             ])
         )
     else:
-        trial_enable = cfg.TEST.TRIAL_RUN
-        if not trial_enable:
+        release_result = cfg.TEST.RELEASE_TEST
+        if release_result is False:
             normalize = transforms.Normalize(
                 # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
-                mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
+                # mean = [0.404, 0.271, 0.222], std = [0.284, 0.202, 0.163]
+                # 160 images from refuge1 val
+                mean=[0.404, 0.267, 0.213], std=[0.285, 0.201, 0.159]
+            )
+            valid_dataset = importlib.import_module('dataset.'+cfg.DATASET.DATASET).Dataset(
+                cfg, cfg.DATASET.ROOT, cfg.DATASET.TEST_SET, False,
+                transforms.Compose([
+                    transforms.ToTensor(),
+                    normalize,
+                ])
             )
         else:
-            normalize = transforms.Normalize(
-                # prepare for refuge2 final submission - 'Refuge2-Ext'
-                # mean=[0.435, 0.211, 0.070], std=[0.310, 0.166, 0.085]
-                mean=[0.532, 0.259, 0.086], std=[0.259, 0.148, 0.088]
-            )
+            trial_enable = cfg.TEST.TRIAL_RUN
+            if not trial_enable:
+                normalize = transforms.Normalize(
+                    # mean=[0.134, 0.207, 0.330], std=[0.127, 0.160, 0.239]
+                    mean = [0.417, 0.208, 0.059], std = [0.273, 0.152, 0.079]
+                )
+            else:
+                normalize = transforms.Normalize(
+                    # prepare for refuge2 final submission - 'Refuge2-Ext'
+                    # mean=[0.435, 0.211, 0.070], std=[0.310, 0.166, 0.085]
+                    mean=[0.532, 0.259, 0.086], std=[0.259, 0.148, 0.088]
+                )
 
-        valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
-            cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
-            transforms.Compose([
-                transforms.ToTensor(),
-                normalize,
-            ])
-        )
+            valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+                cfg, cfg.DATASET.ROOT, cfg.DATASET.VAL_SET, False,
+                transforms.Compose([
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+            )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=cfg.TEST.BATCH_SIZE_PER_GPU*len(cfg.GPUS),
