@@ -7,6 +7,7 @@ import time
 import logging
 import os
 import copy
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -34,6 +35,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
     cuda = torch.device('cuda')
 
     end = time.time()
+    # enumerate(tqdm(train_loader)) if necessary
     for i, (input, input_roi, heatmap_ds, heatmap_roi, offset_in_roi, target_weight, meta) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -252,9 +254,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             sum_db += 1
             lr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_lr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir='./')
             lr_init_avg_l2_dist += lr_tmp_avg_l2_dist
-            hr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_hr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir='./log')
+            hr_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_hr_init_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=output_dir)
             hr_init_avg_l2_dist += hr_tmp_avg_l2_dist
-            final_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_final_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=output_dir)
+            final_tmp_avg_l2_dist = dataset_iter.evaluate(all_fovea_final_preds[(sum_db-1)*each_db_images:sum_db*each_db_images], output_dir=None)
             final_avg_l2_dist += final_tmp_avg_l2_dist
             # logger.info('Dataset %d Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' % (
             #     sum_db, lr_tmp_avg_l2_dist, hr_tmp_avg_l2_dist, final_tmp_avg_l2_dist))
@@ -267,8 +269,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
         final_avg_l2_dist /= sum_db
     else:
         lr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_lr_init_preds, output_dir='./', debug_enable=debug_all)
-        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir='./log', debug_enable=debug_all)
-        final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=output_dir)
+        hr_init_avg_l2_dist = val_dataset.evaluate(all_fovea_hr_init_preds, output_dir=output_dir, debug_enable=debug_all)
+        final_avg_l2_dist = val_dataset.evaluate(all_fovea_final_preds, output_dir=None)
 
     # logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
     #     lr_init_avg_l2_dist, hr_init_avg_l2_dist, final_avg_l2_dist))

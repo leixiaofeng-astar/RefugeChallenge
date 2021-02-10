@@ -765,7 +765,7 @@ class FoveaNet(nn.Module):
             raise ValueError('{} is not exist!'.format(pretrained))
 
     def forward(self, input, meta, input_roi=None):
-        remove_hr_feature = True
+        remove_hr_feature = False
         infer_roi = input_roi is None
         ds_factor = self.cfg.MODEL.DS_FACTOR
 
@@ -873,7 +873,7 @@ class FoveaNet(nn.Module):
             # roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
 
             # TODO: xiaofeng use 256 channel : 64x64 -> 256x256
-            roi_feats_lr = crop_and_resize(input_ds_feats_orig, roi_center / ds_factor, region_size, scale=1.0)
+            roi_feats_lr = crop_and_resize(input_ds_feats_orig, roi_center/ds_factor, region_size, scale=1./ds_factor)
 
 
             # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)

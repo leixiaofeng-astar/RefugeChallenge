@@ -97,13 +97,13 @@ def save_batch_heatmaps(batch_image, batch_heatmaps, file_name,
         height_end = heatmap_height * (i + 1)
         cv2.circle(resized_image,
                    (int(preds[i][0][0]), int(preds[i][0][1])),
-                   1, [0, 0, 255], 1)
+                   1, [255, 0, 255], 2)
         heatmap = heatmaps[0, :, :]
         colored_heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         masked_image = colored_heatmap*0.7 + resized_image*0.3
         cv2.circle(masked_image,
                    (int(preds[i][0][0]), int(preds[i][0][1])),
-                   1, [0, 0, 255], 1)
+                   1, [255, 0, 255], 2)
 
         width_begin = heatmap_width
         width_end = heatmap_width * 2

@@ -62,7 +62,7 @@ class Dataset(FoveaDataset):
         if image_set == 'train':
             # training images and labels
             if TRAIN_AGE_MODEL:
-                train_anno_filename = os.path.join(self.root, 'AGE-train-GT', 'Train_Fovea_locations_AGE.csv')
+                train_anno_filename = os.path.join(self.root, 'AGE-train-GT', 'Train_Fovea_locations_AGE.xlsx')
             else:
                 train_anno_filename = os.path.join(self.root, 'Annotation-Training400',
                                                    'Annotation-Training400', 'Fovea_location.xlsx')
@@ -89,17 +89,20 @@ class Dataset(FoveaDataset):
                 if not self.is_image_file(image_file): continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
-                train_db.append({
-                    'image': data_numpy,
-                    'fovea': np.array([fx, fy], np.float32),
-                    'filename': image_file,
-                })
+
+                # note: some image has wrong GT, pick out them from database
+                if fx > 0 and fy > 0:
+                    train_db.append({
+                        'image': data_numpy,
+                        'fovea': np.array([fx, fy], np.float32),
+                        'filename': image_file,
+                    })
             return train_db
         elif image_set == 'test':
             # test images and labels
             # TODO
             if TRAIN_AGE_MODEL:
-                test_anno_filename = os.path.join(self.root, 'AGE-test-GT', 'test_Fovea_locations_AGE.csv')
+                test_anno_filename = os.path.join(self.root, 'AGE-test-GT', 'test_Fovea_locations_AGE.xlsx')
             else:
                 make_sample_gt = False
                 if make_sample_gt:
@@ -140,7 +143,7 @@ class Dataset(FoveaDataset):
             # validation images and labels
             # TODO
             if TRAIN_AGE_MODEL:
-                val_anno_filename = os.path.join(self.root, 'AGE-val-GT', 'val_Fovea_locations_AGE.csv')
+                val_anno_filename = os.path.join(self.root, 'AGE-val-GT', 'val_Fovea_locations_AGE.xlsx')
             else:
                 val_anno_filename = os.path.join(self.root, 'REFUGE-Validation400-GT', 'Fovea_locations_Val2Train.xlsx')
 

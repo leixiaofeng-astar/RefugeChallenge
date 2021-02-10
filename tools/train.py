@@ -163,7 +163,7 @@ def main():
                 normalize,
             ])
         )
-        val_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
+        valid_dataset = importlib.import_module('dataset.' + cfg.DATASET.DATASET).Dataset(
             cfg, cfg.DATASET.ROOT, cfg.DATASET.TRAIN_SET_2, False,
             transforms.Compose([
                 transforms.ToTensor(),
@@ -180,10 +180,10 @@ def main():
             pin_memory=cfg.PIN_MEMORY
         )
 
-        logger.info("Val Dataset: Total {} images".format(len(val_dataset)))
+        logger.info("Val Dataset: Total {} images".format(len(valid_dataset)))
         test_batch_size = cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS)
         valid_loader = torch.utils.data.DataLoader(
-            val_dataset,
+            valid_dataset,
             batch_size=cfg.TEST.BATCH_SIZE_PER_GPU * len(cfg.GPUS),
             shuffle=False,
             num_workers=cfg.WORKERS,

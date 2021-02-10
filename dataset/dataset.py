@@ -127,14 +127,16 @@ class FoveaDataset(Dataset):
         return len(self.db)
 
     def __getitem__(self, idx):
-        db_rec = copy.deepcopy(self.db[idx])
+        # Xiaofeng change for memory saving
+        # db_rec = copy.deepcopy(self.db[idx])
+        db_rec = self.db[idx]
 
         # load data
         # xiaofeng modify it for data fetch accelerate
-        data_numpy = db_rec['image']
+        data_numpy_orig = db_rec['image']
         filename = db_rec['filename']
 
-        if data_numpy is None:
+        if data_numpy_orig is None:
             logger.error('=> fail to read {}'.format(idx))
             raise ValueError('Fail to read {}'.format(idx))
 
@@ -143,64 +145,22 @@ class FoveaDataset(Dataset):
         else:
             fovea = np.array([-1, -1])
 
-        # xiaofeng add for test
-        # gray_trans = iaa.Grayscale(alpha=0.5)
-        # im = data_numpy[:, :, ::-1]  # Change channels to RGB
-        # im = gray_trans.augment_image(im)
-        # data_numpy = im[:, :, ::-1]  # Change channels to RGB
+        # debug
+        # print("read database: filename-{} fovea-{}".format(filename, fovea))
+        dh, dw = data_numpy_orig.shape[:2]
 
-        # alpha = 0.5
-        # img_temp = data_numpy.copy()
-        # # img_gray = (img_temp[:, :, 0] + img_temp[:, :, 1] + img_temp[:, :, 2]) / 3
-        # img_gray = img_temp[:, :, 0] * 0.11 + img_temp[:, :, 1] * 0.59 + img_temp[:, :, 2] * 0.3
-        # img_gray2 = img_gray * alpha
-        # img_gray2 = img_gray2.reshape(img_gray2.shape[0], img_gray2.shape[1], -1)
-        # img_gray3 = np.tile(img_gray2, [1, 1, 3])
-        # data_numpy = data_numpy.astype(np.float)
-        # data_numpy = data_numpy * alpha + img_gray3
-        #
-        # cmax = data_numpy.max()
-        # Thr0 = 250
-        # if (cmax > Thr0):
-        #     cmax = Thr0
-        #     d2 = data_numpy[data_numpy <= Thr0]
-        #     cmax2 = d2.max()
-        #     data = (data_numpy.clip(0, cmax2)).astype(np.uint16)
-        # else:
-        #     data = (data_numpy.clip(0, cmax)).astype(np.uint16)
-        #     cmax2 = cmax
-        #
-        # scale = float(255.0) / cmax2
-        # if scale == 0:
-        #     scale = 1
-        # bytedata = (data - 0) * scale
-        # data_numpy = (bytedata.clip(0, 255)).astype(np.uint8)
-        # xiaofeng -- end of the trick
-
-        # data_numpy = cv2.cvtColor(data_numpy, cv2.COLOR_BGR2GRAY)
-        # data_numpy = data_numpy.reshape(data_numpy.shape[0], data_numpy.shape[1], -1)
-        # if data_numpy.shape[2] == 1:
-        #     # repeat 3 times to make fake RGB images
-        #     data_numpy = np.tile(data_numpy, [1, 1, 3])
-
-        # prepare for refuge2 final submission - 'Refuge2-Ext'
-        # image size is 4288x2848
-        if self.trial_enable:
-            dh, dw = data_numpy.shape[:2]
-            # crop left 300, right 500
-            pw_l = 300
-            pw_r = 500
-            data_numpy = data_numpy[:, pw_l:(dw-pw_r), :]
-            fovea[0] -= pw_l
-
-        dh, dw = data_numpy.shape[:2]
         # TODO -- need to do sth for different image size
         if dh != self.image_size[1] or dw != self.image_size[0]:
-            data_numpy = cv2.resize(data_numpy, dsize=(self.image_size[0], self.image_size[1]), interpolation=cv2.INTER_LINEAR)
+            data_numpy = cv2.resize(data_numpy_orig, dsize=(self.image_size[0], self.image_size[1]), interpolation=cv2.INTER_LINEAR)
             h_ratio = self.image_size[1] * 1.0 / dh
             w_ratio = self.image_size[0] * 1.0 / dw
             fovea[0] *= w_ratio
             fovea[1] *= h_ratio
+        else:
+            data_numpy = copy.deepcopy(data_numpy_orig)
+
+        # debug
+        # print("after resize to {} fovea-{}".format(data_numpy.shape, fovea))
 
         if self.is_train:
             if self.scale_factor > 0 and np.random.rand() > 0.5:
@@ -208,22 +168,25 @@ class FoveaDataset(Dataset):
                 scale_factor = 1.0 + np.random.rand() * self.scale_factor * sign
                 dh, dw = data_numpy.shape[:2]
                 nh, nw = int(dh * scale_factor), int(dw * scale_factor)
-                data_numpy = cv2.resize(data_numpy, dsize=(nw, nh), interpolation=cv2.INTER_LINEAR)
+                data_numpy = cv2.resize(data_numpy, dsize=(nw, nh), interpolation=cv2.INTER_LINEAR) # (889, 889, 3)
                 fovea[0] *= (nw * 1.0 / dw)
                 fovea[1] *= (nh * 1.0 / dh)
                 if sign > 0: # crop
-                    ph = (nh - self.image_size[1]) // 2
+                    ph = (nh - self.image_size[1]) // 2   # nh=889 after scale, image_size=1064
                     pw = (nw - self.image_size[0]) // 2
                     data_numpy = data_numpy[ph:ph+self.image_size[1], pw:pw+self.image_size[0], :]
                     fovea[0] -= pw
                     fovea[1] -= ph
                 else: # pad
-                    ph = (self.image_size[1] - nh) // 2
+                    ph = (self.image_size[1] - nh) // 2    # (1064 - 889)//2
                     pw = (self.image_size[0] - nw) // 2
                     data_numpy = np.pad(data_numpy, ((ph, self.image_size[1]-nh-ph),
                                                      (pw, self.image_size[0]-nw-pw), (0, 0)), mode='constant')
                     fovea[0] += pw
                     fovea[1] += ph
+
+                    # debug
+                    # print("after scale to pw:{} ph:{} fovea-{}".format(pw, ph, fovea))
 
         image_size = self.image_size
         # crop image from center
@@ -235,10 +198,16 @@ class FoveaDataset(Dataset):
         fovea[0] -= pw
         fovea[1] -= ph
 
+        # debug
+        # print("after crop:{} with pw:{} ph:{} fovea-{}".format(data_numpy.shape, pw, ph, fovea))
+
         # get image transform for augmentation
         c = image_size * 0.5
         r = 0
         s = 0
+
+        # import pdb
+        # pdb.set_trace()
 
         if self.is_train:
             rf = self.rotation_factor
@@ -255,11 +224,13 @@ class FoveaDataset(Dataset):
                 c[0] = data_numpy.shape[1] - c[0] - 1
 
         # xiaofeng test, don't do affine always
-        affine_applied = True
-        if self.is_train and np.random.randn() > 0.9:
-            r = 0
-            s = 0
-            affine_applied = False
+        affine_applied = False
+        r = 0
+        s = 0
+        # if self.is_train and np.random.randn() > 0.9:
+        #     r = 0
+        #     s = 0
+        #     affine_applied = False
             # print("ignore affine")
 
         trans = get_affine_transform(c, r, image_size, shift=s)
@@ -269,7 +240,10 @@ class FoveaDataset(Dataset):
             (int(image_size[0]), int(image_size[1])),
             flags=cv2.INTER_LINEAR)
 
+        # debug
+        # print("before affine: {}" .format(fovea))
         fovea = affine_transform(fovea, trans)
+        # print("after affine: {}".format(fovea))
 
         if self.is_train:
             patch_size = self.patch_size.astype(np.int32)
@@ -278,8 +252,9 @@ class FoveaDataset(Dataset):
             orig_fovea = copy.deepcopy(fovea)
             fovea[0] -= pw
             fovea[1] -= ph
-            # in case the fovea localization is out of range
-            while (fovea[0] < 0 or fovea[1] < 0 or fovea[0] >= patch_size[0] or fovea[1] >= patch_size[1] ):
+            # in case the target localization is out of range
+            c_offset = 20
+            while (fovea[0] < 0 or fovea[1] < 0 or fovea[0] >= (patch_size[0]-c_offset) or fovea[1] >= (patch_size[1]-c_offset) ):
                 pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
                 ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
                 fovea[0] = orig_fovea[0] - pw
@@ -298,12 +273,15 @@ class FoveaDataset(Dataset):
             print("crash info: ", fovea, input.shape, affine_applied)
 
         # print("image: %s=d" %(idx))
-        # print("fovea and size: ", fovea, input.shape)
+        # debug
+        # print("fovea: {}, input shape: {}" .format(fovea, input.shape))
         meta = {'fovea': fovea, 'image': filename}
 
         if self.is_train:
             heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight = \
                 self.generate_target(input, fovea)
+            # debug
+            # print("generate_target: roi_center-{}, fovea-{}, fovea_in_roi-{}".format(roi_center, fovea, fovea_in_roi))
 
             # Note: clahe_enaled is disabled in this release
             if self.clahe_enaled:
@@ -419,8 +397,10 @@ class FoveaDataset(Dataset):
             sign_x = 1 if np.random.rand() > 0.5 else -1
             sign_y = 1 if np.random.rand() > 0.5 else -1
             # ox, oy is the offset in ROI region
-            ox = np.random.rand() * offset
-            oy = np.random.rand() * offset
+            # TODO -- xiaofeng comment the noise applied on ROI region
+            # ox = np.random.rand() * offset
+            # oy = np.random.rand() * offset
+            ox = oy = 0
             cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_size[0] - 1)
             cy = np.clip(sign_y * oy + fovea[1] / feat_stride[1], 0, image_size[1] - 1)
             cx = (cx * feat_stride[0]).astype(np.int32)   # cx scale to original image size
@@ -523,8 +503,10 @@ class FoveaDataset(Dataset):
             offset = self.max_offset
             sign_x = 1 if np.random.rand() > 0.5 else -1
             sign_y = 1 if np.random.rand() > 0.5 else -1
-            ox = np.random.rand() * offset
-            oy = np.random.rand() * offset
+            # TODO -- xiaofeng comment the noise applied on ROI region
+            # ox = np.random.rand() * offset
+            # oy = np.random.rand() * offset
+            ox = oy = 0
             cx = np.clip(sign_x * ox + fovea_in_roi[0], 0, region_size - 1)
             cy = np.clip(sign_y * oy + fovea_in_roi[1], 0, region_size - 1)
 
