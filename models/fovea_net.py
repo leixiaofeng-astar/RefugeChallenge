@@ -648,7 +648,8 @@ class FoveaNet(nn.Module):
         # self.resnet = ResNet18()
         # TODO: increase feature channel
         self.feature_ch = 256
-        self.Resnet34_Unet = Resnet34_Unet(in_channel=3, out_channel=self.feature_ch, pretrained=True)
+        # self.Resnet34_Unet = Resnet34_Unet(in_channel=3, out_channel=self.feature_ch, pretrained=True)
+        self.hrnet_roi = get_hrnet(cfg, is_train=False, **kwargs)
         # self.subpixel_up_by8 = nn.PixelShuffle(8)
         self.subpixel_up_by4 = nn.PixelShuffle(4)
         self.subpixel_up_by2 = nn.PixelShuffle(2)
@@ -752,6 +753,9 @@ class FoveaNet(nn.Module):
             self.hrnet.init_weights(pretrained)
 
             # Initialize high-resolution branch
+            self.hrnet_roi.init_weights(pretrained)
+
+            # Initialize high-resolution branch
             need_init_state_dict = {}
             pretrained_state_dict = torch.load(pretrained)
             for name, m in pretrained_state_dict.items():
@@ -796,7 +800,7 @@ class FoveaNet(nn.Module):
                  })
         else:
             assert 'roi_center' in meta.keys()
-            roi_center = meta['roi_center'].cuda(non_blocking=True)
+            roi_center = meta['roi_center'].cuda(non_blocking=True)   # roi center with random offset
 
         if self.add_heatmap_channel:
             heatmap_2_roilayer = crop_and_resize(heatmap_ds_pred, roi_center/ds_factor, region_size, scale=1. / ds_factor)
@@ -848,8 +852,37 @@ class FoveaNet(nn.Module):
                     # roi_feats_hr = self.resnet(input_roi)    # (batch, 512, 8, 8)
                     # don't apply Resnet34_Unet if remove_hr_feature
                     if not remove_hr_feature:
-                        roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16, 128, 128)
-                        roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear") # (batch, 16, 256, 256)
+                        # TODO: apply HRnet here
+                        # roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16/256, 128, 128)
+                        roi_feats_hr = self.hrnet_roi(input_roi)  # (batch, 256, 64, 64)
+                        roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear") # (batch, 16/256, 256, 256)
+
+                        #TODO: test unet result
+                        # import pdb
+                        # pdb.set_trace()
+                        # input_roi_tmpimg = input_roi[0, :, :, :]
+                        # if len(input_roi_tmpimg.shape) > 2: input_roi_tmpimg = input_roi_tmpimg.permute(1, 2, 0)
+                        # tmpimg = input_roi_tmpimg.detach().cpu().numpy()
+                        #
+                        # tmpimg -= np.min(tmpimg)
+                        # tmpimg /= np.max(tmpimg)  # Normalize between 0-1
+                        # tmpimg = np.uint8(tmpimg * 255.0)
+                        # tmp_file = "tmp.png"
+                        # cv2.imwrite(tmp_file, tmpimg)
+                        # # tmp_c = roi_feats_hr.shape[0]
+                        # # for i in range(tmp_c):
+                        # # sample_roi_image = roi_feats_hr[0, :, :, :]
+                        # # sample_roi_image = torch.mean(sample_roi_image, 0)
+                        # # sample_roi_image = self.subpixel_up_by4(roi_feats_hr)
+                        # sample_roi_image = roi_feats_hr[0, :, :, :]
+                        # # sample_roi_image = torch.mean(sample_roi_image, 0)
+                        # sample_roi_image = sample_roi_image[0, :, :]
+                        # sample_roi_image = sample_roi_image.detach().cpu().numpy()
+                        # sample_roi_image -= np.min(sample_roi_image)
+                        # sample_roi_image /= np.max(sample_roi_image)  # Normalize between 0-1
+                        # sample_roi_image = np.uint8(sample_roi_image * 255.0)
+                        # tmp_file = "tmp_unet.png"
+                        # cv2.imwrite(tmp_file, sample_roi_image)
 
             # xiaofeng add for k=3 layer for ROI
             if self.cfg.TRAIN.MV_IDEA:

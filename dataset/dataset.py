@@ -128,6 +128,7 @@ class FoveaDataset(Dataset):
 
     def __getitem__(self, idx):
         # Xiaofeng change for memory saving
+        debug_option = False
         # db_rec = copy.deepcopy(self.db[idx])
         db_rec = self.db[idx]
 
@@ -145,8 +146,8 @@ class FoveaDataset(Dataset):
         else:
             fovea = np.array([-1, -1])
 
-        # debug
-        # print("read database: filename-{} fovea-{}".format(filename, fovea))
+        if debug_option:
+            print("read database: filename-{} fovea-{}".format(filename, fovea))
         dh, dw = data_numpy_orig.shape[:2]
 
         # TODO -- need to do sth for different image size
@@ -159,8 +160,8 @@ class FoveaDataset(Dataset):
         else:
             data_numpy = copy.deepcopy(data_numpy_orig)
 
-        # debug
-        # print("after resize to {} fovea-{}".format(data_numpy.shape, fovea))
+        if debug_option:
+            print("after resize to {} fovea-{}".format(data_numpy.shape, fovea))
 
         if self.is_train:
             if self.scale_factor > 0 and np.random.rand() > 0.5:
@@ -198,8 +199,8 @@ class FoveaDataset(Dataset):
         fovea[0] -= pw
         fovea[1] -= ph
 
-        # debug
-        # print("after crop:{} with pw:{} ph:{} fovea-{}".format(data_numpy.shape, pw, ph, fovea))
+        if debug_option:
+            print("after crop:{} with pw:{} ph:{} fovea-{}".format(data_numpy.shape, pw, ph, fovea))
 
         # get image transform for augmentation
         c = image_size * 0.5
@@ -231,8 +232,6 @@ class FoveaDataset(Dataset):
         #     r = 0
         #     s = 0
         #     affine_applied = False
-            # print("ignore affine")
-
         trans = get_affine_transform(c, r, image_size, shift=s)
         input = cv2.warpAffine(
             data_numpy,
@@ -240,10 +239,11 @@ class FoveaDataset(Dataset):
             (int(image_size[0]), int(image_size[1])),
             flags=cv2.INTER_LINEAR)
 
-        # debug
-        # print("before affine: {}" .format(fovea))
+        if debug_option:
+            print("before affine: {}" .format(fovea))
         fovea = affine_transform(fovea, trans)
-        # print("after affine: {}".format(fovea))
+        if debug_option:
+            print("after affine: {}".format(fovea))
 
         if self.is_train:
             patch_size = self.patch_size.astype(np.int32)
@@ -253,12 +253,17 @@ class FoveaDataset(Dataset):
             fovea[0] -= pw
             fovea[1] -= ph
             # in case the target localization is out of range
-            c_offset = 20
+            c_offset = 0
+            count = 0
             while (fovea[0] < 0 or fovea[1] < 0 or fovea[0] >= (patch_size[0]-c_offset) or fovea[1] >= (patch_size[1]-c_offset) ):
                 pw = np.random.randint(0, int(image_size[0] - patch_size[0] + 1))
                 ph = np.random.randint(0, int(image_size[1] - patch_size[1] + 1))
                 fovea[0] = orig_fovea[0] - pw
                 fovea[1] = orig_fovea[1] - ph
+                count += 1
+                if count>=8:
+                    print("ROI crop warning, pw:{}, ph:{}, fovea:{}" .format(pw, ph, fovea))
+                    count = 0
 
             # TODO : is it necessary?
             # it do the crop to PATCH_SIZE size: default is 1024
@@ -272,16 +277,19 @@ class FoveaDataset(Dataset):
         except:
             print("crash info: ", fovea, input.shape, affine_applied)
 
-        # print("image: %s=d" %(idx))
+        # print("image:=%d" %(idx))
         # debug
         # print("fovea: {}, input shape: {}" .format(fovea, input.shape))
         meta = {'fovea': fovea, 'image': filename}
 
         if self.is_train:
+            # roi_center with offset center, fovea_in_roi is real fovea
             heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight = \
                 self.generate_target(input, fovea)
             # debug
             # print("generate_target: roi_center-{}, fovea-{}, fovea_in_roi-{}".format(roi_center, fovea, fovea_in_roi))
+            # import pdb
+            # pdb.set_trace()
 
             # Note: clahe_enaled is disabled in this release
             if self.clahe_enaled:
@@ -332,11 +340,11 @@ class FoveaDataset(Dataset):
         # below for coarse stage heatmap
         if self.target_type == 'gaussian':
             if self.is_train:
-                image_size = self.patch_size   # 1024
+                image_size = self.patch_size   # 1024 or 896 for AGE
                 image_ds_size = self.patch_size / self.ds_factor  # 1024/4
             else:
-                image_size = self.crop_size    # 1536
-                image_ds_size = self.crop_size / self.ds_factor   # 1536/4
+                image_size = self.crop_size    # 1536 or 1024 for AGE
+                image_ds_size = self.crop_size / self.ds_factor   # 1536/4  or AGE 1024/4
             image_size = image_size.astype(np.int32)
             image_ds_size = image_ds_size.astype(np.int32)
             heatmap_ds = np.zeros((1,
@@ -345,15 +353,13 @@ class FoveaDataset(Dataset):
                                    dtype=np.float32)
             target_weight = np.array([1.], np.float32)
 
-            # xiaofeng comment: it is 2x3
-            tmp_size = self.sigma * 3
             # xiaofeng comment: feat_stride = self.ds_factor = 4
             feat_stride = image_size / image_ds_size
             mu_x = int(fovea[0] / feat_stride[0] + 0.5)
             mu_y = int(fovea[1] / feat_stride[1] + 0.5)
             # Check that any part of the gaussian is in-bounds
-            ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
-            br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+            ul = [int(mu_x - self.sigma), int(mu_y - self.sigma)]
+            br = [int(mu_x + self.sigma + 1), int(mu_y + self.sigma + 1)]
             # xiaofeng think it should be a bug, but it will always bypass the code as below
             if ul[0] >= image_ds_size[0] or ul[1] >= image_ds_size[1] \
                     or br[0] < 0 or br[1] < 0:
@@ -373,7 +379,7 @@ class FoveaDataset(Dataset):
                 return heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight
 
             # # Generate gaussian
-            size = 2 * tmp_size + 1
+            size = 2 * self.sigma + 1
             x = np.arange(0, size, 1, np.float32)
             y = x[:, np.newaxis]
             x0 = y0 = size // 2
@@ -390,63 +396,57 @@ class FoveaDataset(Dataset):
             heatmap_ds[0][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                 g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
 
+
+
+            # TODO -- the following code is for ROI heatmap
             # sample a noisily centered ROI region for high-resolution target
-            # xiaofeng comment: offset = 8
-            offset = self.max_ds_offset
+            offset = self.max_ds_offset    # MAX_DS_OFFSET = 8
             region_size = self.region_radius * 2
-            sign_x = 1 if np.random.rand() > 0.5 else -1
-            sign_y = 1 if np.random.rand() > 0.5 else -1
+
+            # apply the nosie randomly to make it robust, change it from 50% to 10%
+            if np.random.rand() > 0.8:
+                sign_x = 1 if np.random.rand() > 0.5 else -1
+                sign_y = 1 if np.random.rand() > 0.5 else -1
+            else:
+                sign_x = 0
+                sign_y = 0
             # ox, oy is the offset in ROI region
-            # TODO -- xiaofeng comment the noise applied on ROI region
-            # ox = np.random.rand() * offset
-            # oy = np.random.rand() * offset
-            ox = oy = 0
-            cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_size[0] - 1)
-            cy = np.clip(sign_y * oy + fovea[1] / feat_stride[1], 0, image_size[1] - 1)
+            ox = np.random.rand() * offset
+            oy = np.random.rand() * offset
+            # xiaofeng change for fovea center
+            # cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_size[0] - 1)
+            # cy = np.clip(sign_y * oy + fovea[1] / feat_stride[1], 0, image_size[1] - 1)
+            cx = np.clip(sign_x * ox + fovea[0] / feat_stride[0], 0, image_ds_size[0] - 1)
+            cy = np.clip(sign_y * oy + fovea[1] / feat_stride[1], 0, image_ds_size[1] - 1)
+
+            # debug
+            # import pdb
+            # pdb.set_trace()
+
+            # cx, cy is fake coord with offset
             cx = (cx * feat_stride[0]).astype(np.int32)   # cx scale to original image size
             cy = (cy * feat_stride[1]).astype(np.int32)
 
             # get fovea location in this ROI
             # fovea_in_roi coordination is based on small ROI [0,0]->[256,256], such as [128, 128]
             fovea_in_roi = fovea.copy()
-            fovea_in_roi[0] -= (cx - self.region_radius)
+            fovea_in_roi[0] -= (cx - self.region_radius)   # related coord in ROI region, offset 4, center from 100->104
             fovea_in_roi[1] -= (cy - self.region_radius)
 
             # Re-apply the target generation process
-            image_size = np.array([region_size, region_size], np.int32)
-            if self.mv_idea:
-                if self.mv_idea_hm1:
-                    # comment: xiaofeng tried np.ones
-                    heatmap_roi = np.zeros((1,
-                                            region_size,
-                                            region_size),
-                                           dtype=np.float32)
-                else:
-                    heatmap_roi = np.zeros((1,
-                                            region_size,
-                                            region_size),
-                                           dtype=np.float32)
-            else:
-                heatmap_roi = np.zeros((1,
+            # image_size = np.array([region_size, region_size], np.int32)
+            heatmap_roi = np.zeros((1,
                                        region_size,
                                        region_size),
                                        dtype=np.float32)
             target_weight = np.array([1.], np.float32)
 
-            # TODO: xiaofeng comment: it should bigger = self.sigma x feat_stride ??
-            if self.mv_idea:
-                if self.mv_idea_hm1:
-                    tmp_size = self.sigma_roi * 10
-                else:
-                    tmp_size = self.sigma_roi * 10
-            else:
-                tmp_size = self.sigma_roi * 3
-
             mu_x = int(fovea_in_roi[0] + 0.5)
             mu_y = int(fovea_in_roi[1] + 0.5)
+
             # Check that any part of the gaussian is in-bounds
-            ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
-            br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+            ul = [int(mu_x - self.sigma_roi), int(mu_y - self.sigma_roi)]
+            br = [int(mu_x + self.sigma_roi + 1), int(mu_y + self.sigma_roi + 1)]
             ## xiaofeng think it should be a bug, but it will always bypass the code as below
             if ul[0] >= region_size or ul[1] >= region_size \
                     or br[0] < 0 or br[1] < 0:
@@ -465,32 +465,16 @@ class FoveaDataset(Dataset):
                 return heatmap_ds, heatmap_roi, roi_center, pixel_in_roi, offset_in_roi, fovea, fovea_in_roi, target_weight
 
             # # Generate gaussian
-            size = 2 * tmp_size + 1
+            size = 2 * self.sigma_roi + 1
             x = np.arange(0, size, 1, np.float32)
             y = x[:, np.newaxis]
             x0 = y0 = size // 2
-            # The gaussian is not normalized, we want the center value to equal 1
-            # xiaofeng add: mv processing is for ROI region only
-            # https://stackoverflow.com/questions/44865023/how-can-i-create-a-circular-mask-for-a-numpy-array
-            if self.mv_idea:
-                # create a circle
-                if self.mv_idea_hm1:
-                    # method 2 -- set the center point to 1 -- make it same as ds area
-                    g = self.create_circular_mask(size, size)
-                else:
-                    # set the center area to 1
-                    g = np.ones((size, size), np.uint8)
-                    mask = self.create_circular_mask(size, size)
-                    g[mask] = 1
-                    g[~mask] = 0
-
-            else:
-                g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
+            g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * (self.sigma_roi) ** 2))
 
             # Usable gaussian range
             g_x = max(0, -ul[0]), min(br[0], region_size) - ul[0]
             g_y = max(0, -ul[1]), min(br[1], region_size) - ul[1]
-            # Image range
+            # Image fill in gaussian range
             img_x = max(0, ul[0]), min(br[0], region_size)
             img_y = max(0, ul[1]), min(br[1], region_size)
 
@@ -503,10 +487,9 @@ class FoveaDataset(Dataset):
             offset = self.max_offset
             sign_x = 1 if np.random.rand() > 0.5 else -1
             sign_y = 1 if np.random.rand() > 0.5 else -1
-            # TODO -- xiaofeng comment the noise applied on ROI region
-            # ox = np.random.rand() * offset
-            # oy = np.random.rand() * offset
-            ox = oy = 0
+            # noise applied on ROI region
+            ox = np.random.rand() * offset
+            oy = np.random.rand() * offset
             cx = np.clip(sign_x * ox + fovea_in_roi[0], 0, region_size - 1)
             cy = np.clip(sign_y * oy + fovea_in_roi[1], 0, region_size - 1)
 

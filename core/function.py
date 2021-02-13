@@ -160,6 +160,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 meta_flip = copy.deepcopy(meta)
                 heatmap_ds_pred_flip, heatmap_roi_pred_flip, offset_in_roi_pred_flip, meta_flip = model(input_flipped, meta_flip, input_roi=None)
 
+                # coords_lr, coords_hr, coords_final, coords_roi, coords_roi_final
                 fovea_lr_init_pred_flip, fovea_hr_init_pred_flip, fovea_final_pred_flip, fovea_roi_init_pred_flip, fovea_roi_final_pred_flip = \
                     get_final_preds(config,
                                     heatmap_ds_pred_flip.cpu().numpy(),

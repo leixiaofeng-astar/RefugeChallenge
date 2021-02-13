@@ -127,7 +127,7 @@ def get_final_preds(config, batch_heatmap_ds, batch_heatmap_roi, offsets_in_roi,
     # coords: [N, 1, 2] -> [N, 2]
     coords_ds = coords_ds[:, 0, :]
     coords_roi = coords_roi[:, 0, :]
-    coords_lr = coords_ds * config.MODEL.DS_FACTOR
+    coords_lr = coords_ds * config.MODEL.DS_FACTOR  # coords in lr x scaling
     coords_hr = coords_roi + meta['roi_center'].cpu().numpy() - config.MODEL.REGION_RADIUS
     coords_final = coords_hr + offsets_in_roi
     coords_roi_final = coords_roi + offsets_in_roi
