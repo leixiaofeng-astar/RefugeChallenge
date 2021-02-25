@@ -1,10 +1,7 @@
 '''
 Instructions to use:
-     python3.7 tools/test.py --cfg experiments/refuge.yaml
-     TRAIN.MV_IDEA True
-     TRAIN.MV_IDEA_HM1 True
-     TEST.MODEL_FILE output/refuge/fovea_net/refuge/checkpoint_HM1_L7_Aug28.pth
-     TEST.RELEASE_TEST False
+     python3.7 tools/test.py --cfg experiments/refuge.yaml TEST.MODEL_FILE output/refuge/fovea_net/refuge/model_best_L12dot8_2stage_finetune_AGE.pth
+
 
      python3.7 tools/test.py --cfg experiments/refuge.yaml TEST.MODEL_FILE output/refuge/fovea_net/refuge/model_best.pth TEST.RELEASE_TEST True
 

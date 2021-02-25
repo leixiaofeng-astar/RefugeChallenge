@@ -86,7 +86,8 @@ class Dataset(FoveaDataset):
                         image_file = os.path.join(self.root, 'REFUGE-Training400', 'Training400', 'Glaucoma', fname)
                     else:
                         assert False, 'unkown entry: %s' % (fname)
-                if not self.is_image_file(image_file): continue
+                if (not self.is_image_file(image_file)) or (not os.path.isfile(image_file)):
+                    continue
 
                 data_numpy = cv2.imread(image_file, cv2.IMREAD_COLOR)
 
@@ -273,7 +274,11 @@ class Dataset(FoveaDataset):
         # the predicted coordinates are based on the resized and center-cropped
         # images, convert them back
         image_size = self.cfg.MODEL.IMAGE_SIZE
-        crop_size = self.cfg.MODEL.CROP_SIZE
+        # xiaofeng change for AGE x128 size issue
+        # crop_size = self.cfg.MODEL.CROP_SIZE
+        crop_size = self.cfg.MODEL.PATCH_SIZE
+        # end of xiaofeng change for AGE x128 size issue
+
         pw = (image_size[0] - crop_size[0]) // 2
         ph = (image_size[1] - crop_size[1]) // 2
         preds[:, 0] += pw
@@ -289,6 +294,7 @@ class Dataset(FoveaDataset):
         l2_dist_sum = 0.
         for _ in range(num_images):
             gt = self.db[_]['fovea']
+            # print("file:{}, fovea:[{},{}]/{}" .format(self.db[_]['filename'], preds[_,0],preds[_,1], self.db[_]['fovea']))
             l2_dist_sum += np.sqrt(np.sum((preds[_, :] - gt)**2))
         l2_dist_avg = l2_dist_sum / num_images
 
@@ -317,4 +323,6 @@ class Dataset(FoveaDataset):
                         cw.writerow([image_name, fovea_x, fovea_y])
                 f.close()
 
+        # import pdb
+        # pdb.set_trace()
         return l2_dist_avg

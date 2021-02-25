@@ -191,13 +191,25 @@ class FoveaDataset(Dataset):
 
         image_size = self.image_size
         # crop image from center
-        crop_size = self.crop_size
-        pw = (image_size[0] - crop_size[0]) // 2
-        ph = (image_size[1] - crop_size[1]) // 2
-        data_numpy = data_numpy[ph:ph+crop_size[1], pw:pw+crop_size[0], :]
-        image_size = crop_size
-        fovea[0] -= pw
-        fovea[1] -= ph
+        # crop_size = self.crop_size
+        if self.is_train:
+            crop_size = self.crop_size
+            pw = (image_size[0] - crop_size[0]) // 2
+            ph = (image_size[1] - crop_size[1]) // 2
+            data_numpy = data_numpy[ph:ph+crop_size[1], pw:pw+crop_size[0], :]
+            image_size = crop_size
+            fovea[0] -= pw
+            fovea[1] -= ph
+        else:
+            # TODO: AGE size issue
+            crop_size = self.patch_size
+            pw = (image_size[0] - crop_size[0]) // 2
+            ph = (image_size[1] - crop_size[1]) // 2
+            data_numpy = data_numpy[ph:ph + crop_size[1], pw:pw + crop_size[0], :]
+            image_size = crop_size
+            fovea[0] -= pw
+            fovea[1] -= ph
+            # end of AGE size issue
 
         if debug_option:
             print("after crop:{} with pw:{} ph:{} fovea-{}".format(data_numpy.shape, pw, ph, fovea))
@@ -306,10 +318,20 @@ class FoveaDataset(Dataset):
                                             output_size=2 * self.region_radius, scale=1.0)[0]
             else:
                 # crop ROI
-                # TODO: try to generate 3 different ROI and return
-                input_roi = crop_and_resize(input.unsqueeze(0),
+                # TODO: try to generate 3 ROI and return
+                # input_roi = crop_and_resize(input.unsqueeze(0),
+                #                             torch.from_numpy(roi_center).unsqueeze(0),
+                #                             output_size=2*self.region_radius, scale=1.0)[0]
+                input_roi = []
+                input_roi.append(crop_and_resize(input.unsqueeze(0),
                                             torch.from_numpy(roi_center).unsqueeze(0),
-                                            output_size=2*self.region_radius, scale=1.0)[0]
+                                            output_size=2 * self.region_radius, scale=1.0)[0])
+                input_roi.append(crop_and_resize(input.unsqueeze(0),
+                                               torch.from_numpy(roi_center).unsqueeze(0),
+                                               output_size=2 * self.region_radius, scale=1.5)[0])
+                input_roi.append(crop_and_resize(input.unsqueeze(0),
+                                               torch.from_numpy(roi_center).unsqueeze(0),
+                                               output_size=2 * self.region_radius, scale=2.0)[0])
 
             heatmap_ds = torch.from_numpy(heatmap_ds).float()
             heatmap_roi = torch.from_numpy(heatmap_roi).float()
@@ -343,8 +365,14 @@ class FoveaDataset(Dataset):
                 image_size = self.patch_size   # 1024 or 896 for AGE
                 image_ds_size = self.patch_size / self.ds_factor  # 1024/4
             else:
-                image_size = self.crop_size    # 1536 or 1024 for AGE
-                image_ds_size = self.crop_size / self.ds_factor   # 1536/4  or AGE 1024/4
+                # TODO: AGE size issue
+                # image_size = self.crop_size    # 1536 or 1024 for AGE
+                # image_ds_size = self.crop_size / self.ds_factor   # 1536/4  or AGE 1024/4
+                # xiaofeng change for AGE x128 size issue
+                image_size = self.patch_size  # 1024 or 896 for AGE
+                image_ds_size = self.patch_size / self.ds_factor  # 1024/4
+                # end of AGE size issue
+
             image_size = image_size.astype(np.int32)
             image_ds_size = image_ds_size.astype(np.int32)
             heatmap_ds = np.zeros((1,

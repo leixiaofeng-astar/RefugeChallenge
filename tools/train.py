@@ -54,6 +54,7 @@ from utils.utils import create_logger
 
 import dataset
 import models
+from models.optimization import BertAdam
 
 
 def timer(start_time=None):
@@ -266,7 +267,23 @@ def main():
     best_metric = 1e6
     best_model = False
     last_epoch = -1
+
+    # TODO -- the self-attention module
     optimizer = get_optimizer(cfg, model)
+
+    # batch_per_epoch = len(train_dataset) // train_batch_size + 1
+    # t_total = int(batch_per_epoch * cfg.TRAIN.END_EPOCH)
+    # print("Batch per epoch: %d" % batch_per_epoch)
+    # print("Total Iters: %d" % t_total)
+    # print("LR: %f" % cfg.TRAIN.LR)
+    # lr_warmup_steps = t_total // 5
+    # lr_warmup_steps = min(lr_warmup_steps, t_total // 2)
+    # lr_warmup_ratio = lr_warmup_steps / t_total
+    # print("LR Warm up: %.3f=%d iters" % (lr_warmup_ratio, lr_warmup_steps))
+    #
+    # optimizer = BertAdam(model.parameters(), lr=cfg.TRAIN.LR, warmup=lr_warmup_ratio, t_total=t_total, weight_decay=0.0001)
+    # end of # the self-attention module
+
     begin_epoch = cfg.TRAIN.BEGIN_EPOCH
 
     if cfg.TEST.MODEL_FILE:
@@ -326,7 +343,8 @@ def main():
         print("validation spent time:")
         val_time = timer(train_time)  # timing ends here for "start_time" variable
 
-        min_metric = min(lr_metric, hr_metric, final_metric)
+        # min_metric = min(lr_metric, hr_metric, final_metric)
+        min_metric = min(lr_metric, hr_metric)
         if min_metric <= best_metric:
             best_metric = min_metric
             best_model = True

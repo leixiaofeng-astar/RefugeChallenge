@@ -109,8 +109,9 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
                                 heatmap_roi_pred.detach().cpu().numpy(),
                                 offset_in_roi_pred.detach().cpu().numpy(),
                                 meta)
+            # change input_roi to input_roi[0] for 3 ROI
             save_debug_images(config,
-                              input, input_roi,
+                              input, input_roi[0],
                               heatmap_ds, heatmap_roi, meta,
                               heatmap_ds_pred, heatmap_roi_pred,
                               fovea_final_pred, fovea_roi_init_pred, fovea_roi_final_pred,
@@ -125,6 +126,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     final_dists = AverageMeter()
 
     # switch to evaluate mode
+    # import pdb
+    # pdb.set_trace()
+    # model = model.cpu()
     model.eval()
 
     num_samples = len(val_dataset)
@@ -226,6 +230,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                                   fovea_final_pred, fovea_roi_init_pred, fovea_roi_final_pred,
                                   prefix)
 
+            #debug
+            # print("check meta fovea {}: {}/{}/{}" .format(i, fovea_target, fovea_hr_init_pred, meta['image']))
+
         if writer_dict:
             writer = writer_dict['writer']
             global_steps = writer_dict['valid_global_steps']
@@ -275,7 +282,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
 
     # logger.info('Average L2 Distance on test set: lr_init = %.2f, hr_init = %.2f, final = %.2f' %(
     #     lr_init_avg_l2_dist, hr_init_avg_l2_dist, final_avg_l2_dist))
-    logger.info('Average L2 Distance on test set: lr_L2 = %.2f, hr_L2 = %.2f' %(lr_init_avg_l2_dist, hr_init_avg_l2_dist))
+    logger.info('Average L2 Distance on evaluation: lr_L2 = %.2f, hr_L2 = %.2f' %(lr_init_avg_l2_dist, hr_init_avg_l2_dist))
 
     return lr_init_dists.avg, hr_init_dists.avg, final_dists.avg
 

@@ -18,6 +18,7 @@ import numpy as np
 from core.inference import get_max_preds, get_heatmap_center_preds
 from utils.transforms import crop_and_resize
 from efficientnet.model import EfficientNet
+from models.polyformer import PolyformerLayer
 
 
 BN_MOMENTUM = 0.1
@@ -383,11 +384,16 @@ class HighResolutionModule(nn.Module):
 
         for i in range(len(self.fuse_layers)):
             y = x[0] if i == 0 else self.fuse_layers[i][0](x[0])
-            for j in range(1, self.num_branches):
-                if i == j:
-                    y = y + x[j]
-                else:
-                    y = y + self.fuse_layers[i][j](x[j])
+            try:
+                for j in range(1, self.num_branches):
+                    if i == j:
+                        y = y + x[j]
+                    else:
+                        y = y + self.fuse_layers[i][j](x[j])
+            except:
+                import pdb
+                pdb.set_trace()
+                print(y.shape, (self.fuse_layers[i][j](x[j])).shape)
             x_fuse.append(self.relu(y))
 
         return x_fuse
@@ -647,9 +653,12 @@ class FoveaNet(nn.Module):
         # xiaofeng: add to replace stemNet -- test only
         # self.resnet = ResNet18()
         # TODO: increase feature channel
-        self.feature_ch = 256
+        self.feature_ch = 64
         # self.Resnet34_Unet = Resnet34_Unet(in_channel=3, out_channel=self.feature_ch, pretrained=True)
         self.hrnet_roi = get_hrnet(cfg, is_train=False, **kwargs)
+        self.hrnet_roi_2 = get_hrnet(cfg, is_train=False, **kwargs)
+        self.hrnet_roi_3 = get_hrnet(cfg, is_train=False, **kwargs)
+
         # self.subpixel_up_by8 = nn.PixelShuffle(8)
         self.subpixel_up_by4 = nn.PixelShuffle(4)
         self.subpixel_up_by2 = nn.PixelShuffle(2)
@@ -686,9 +695,13 @@ class FoveaNet(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
+        # the self-attention module
+        # self.attention = PolyformerLayer(self.feature_ch*4)
+
         # fusion layer
-        self.convf = nn.Conv2d(self.feature_ch*2, self.feature_ch*2, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bnf = nn.BatchNorm2d(self.feature_ch*2, momentum=BN_MOMENTUM)
+        self.convf = nn.Conv2d(self.feature_ch*4, self.feature_ch*4, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bnf = nn.BatchNorm2d(self.feature_ch*4, momentum=BN_MOMENTUM)
+        # x2 feature channel if we remove hr feat
         self.convf_roi = nn.Conv2d(self.feature_ch, self.feature_ch*2, kernel_size=3, stride=1, padding=1, bias=False)
 
         # heatmap layer
@@ -700,10 +713,10 @@ class FoveaNet(nn.Module):
         # )
         self.heatmap_roi = nn.Sequential(
             # 512->128
-            nn.Conv2d(512, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128, momentum=BN_MOMENTUM),
+            nn.Conv2d(self.feature_ch*4, self.feature_ch*2, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(self.feature_ch*2, momentum=BN_MOMENTUM),
             nn.ReLU(),
-            nn.Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(self.feature_ch*2, 32, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(32, momentum=BN_MOMENTUM),
             nn.ReLU(),
             nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0),
@@ -754,6 +767,8 @@ class FoveaNet(nn.Module):
 
             # Initialize high-resolution branch
             self.hrnet_roi.init_weights(pretrained)
+            self.hrnet_roi_2.init_weights(pretrained)
+            self.hrnet_roi_3.init_weights(pretrained)
 
             # Initialize high-resolution branch
             need_init_state_dict = {}
@@ -774,14 +789,14 @@ class FoveaNet(nn.Module):
         ds_factor = self.cfg.MODEL.DS_FACTOR
 
         # Low-resolution branch
-        batch, _, ih, iw = input.size()   # train input is 256x256
+        batch, _, ih, iw = input.size()   # train input is 256x256 / AGE 768x768
         nh = int(ih * 1.0 / ds_factor)
         nw = int(iw * 1.0 / ds_factor)
         input_ds = F.upsample(input, size=(nh, nw), mode='bilinear', align_corners=True)
         input_ds_feats_orig = self.hrnet(input_ds)  # (batch, 256, 64, 64)
         # 256 channel --> 16 channel, HRNET resolution: (batch, 256, 64, 64) --> (20, 16, 256, 256)
         input_ds_feats = self.subpixel_up_by4(input_ds_feats_orig)
-        # 16 channel --> 1 channel / (batch, 16, 256, 256) --> (batch, 1, 256, 256)
+        # heatmap_ds: 16 channel --> 1 channel / (batch, 16, 256, 256) --> (batch, 1, 256, 256)
         heatmap_ds_pred = self.heatmap_ds(input_ds_feats)
 
         # High-resolution branch
@@ -792,11 +807,28 @@ class FoveaNet(nn.Module):
             roi_center = torch.FloatTensor(roi_center)
             roi_center *= ds_factor
             roi_center = roi_center.cuda(non_blocking=True)
-            input_roi = crop_and_resize(input, roi_center, region_size)
-            # TODO: we could generate 3 different ROI here
+            # TODO -- change for 3 ROI
+            # input_roi = crop_and_resize(input, roi_center, region_size)
+            # meta.update(
+            #     {'roi_center': roi_center.cpu(),
+            #      'input_roi': input_roi.cpu()
+            #      })
+
+            input_roi = []
+            input_roi.append(crop_and_resize(input, roi_center, region_size, scale=1.0))
+            input_roi.append(crop_and_resize(input, roi_center, region_size, scale=1.5))
+            input_roi.append(crop_and_resize(input, roi_center, region_size, scale=2.0))
+            # import pdb
+            # pdb.set_trace()
+            # for i in range(len(input_roi)):
+                # cuda = torch.device('cuda')
+                # input_roi[i] = input_roi[i].to(device=cuda)
+                # input_roi[i] = input_roi[i].cpu()
+
+            # TODO: end of 3 ROI here
             meta.update(
                 {'roi_center': roi_center.cpu(),
-                 'input_roi': input_roi.cpu()
+                 'input_roi': input_roi[0].cpu()
                  })
         else:
             assert 'roi_center' in meta.keys()
@@ -809,144 +841,145 @@ class FoveaNet(nn.Module):
 
         # (batch, 16, 256, 256)
         # 3 channel --> 64 channel (batch, 3, 256, 256) --> (batch, 64, 128, 128)
-        if self.cfg.TRAIN.ROI_CLAHE:
-            B, C, H, W = input_roi.shape
-            # xiaofeng add for test
-            # import pdb
-            # pdb.set_trace()
-            data_numpy = copy.deepcopy(input_roi)
-            data_numpy = data_numpy.cpu().permute([0, 2, 3, 1])
-            for i in range(B):
-                img = data_numpy.numpy()[i,:,:,:].astype('uint8')
-                # print("clahe: ", img.shape)
-                b, g, r = cv2.split(img)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-                b = clahe.apply(b)
-                g = clahe.apply(g)
-                r = clahe.apply(r)
-                img = cv2.merge([b, g, r])
-                data_numpy[i,:,:,:] = torch.from_numpy(img)
-                # print("after clahe: ", img.shape)
-            data_numpy = data_numpy.cuda().permute([0, 3, 1, 2])
-
-            if self.cfg.TRAIN.MV_IDEA:
-                if self.orig_stemnet:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
-                else:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1_1(data_numpy)))
-            else:
-                roi_feats_hr = self.relu(self.bn1(self.conv1(data_numpy)))
+        if self.orig_stemnet:
+            roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
             roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
         else:
+            # roi_feats_hr = self.resnet(input_roi)    # (batch, 512, 8, 8)
+            # don't apply Resnet34_Unet if remove_hr_feature
+            multi_ROI_feature = True
+            if not remove_hr_feature:
+                if not multi_ROI_feature:
+                    # TODO: use HRnet replace Resnet34_Unet
+                    # roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16/256, 128, 128)
+                    roi_feats_hr = self.hrnet_roi(input_roi)  # (batch, 256, 64, 64)
+                    roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear")  # (batch, 16/256, 256, 256)
+                else:
+                    # TODO -- use 3 ROI info
+                    # import pdb
+                    # pdb.set_trace()
+                    multi_roi_center = np.empty(shape=(batch, 2))
+                    multi_roi_center.fill(region_size/2-1)
+                    multi_roi_center = torch.from_numpy(multi_roi_center)
+                    multi_roi_center = multi_roi_center.cuda(non_blocking=True)
+
+                    # 1st ROI 1:1
+                    roi_feats_hr_1 = self.hrnet_roi(input_roi[0])  # (batch, 256, 64, 64)
+                    roi_feats_hr_1 = self.subpixel_up_by2(roi_feats_hr_1)  # 256 -> 64 channel
+                    roi_feats_hr_1 = F.interpolate(roi_feats_hr_1, region_size, mode="bilinear")
+                    roi_feats_hr_1 = crop_and_resize(roi_feats_hr_1, multi_roi_center, region_size, scale=1.0)
+
+                    # 2nd ROI 1.5:1
+                    roi_feats_hr_2 = self.hrnet_roi_2(input_roi[1])  # (batch, 256, 64, 64)
+                    roi_feats_hr_2 = self.subpixel_up_by2(roi_feats_hr_2)  # 256 -> 64 channel
+                    roi_feats_hr_2 = F.interpolate(roi_feats_hr_2, region_size, mode="bilinear")
+                    roi_feats_hr_2 = crop_and_resize(roi_feats_hr_2, multi_roi_center, region_size, scale=1/1.5)
+
+                    # 3rd ROI 2:1
+                    roi_feats_hr_3 = self.hrnet_roi_3(input_roi[2])  # (batch, 256, 64, 64)
+                    roi_feats_hr_3 = self.subpixel_up_by2(roi_feats_hr_3)  # 256 -> 64 channel
+                    roi_feats_hr_3 = F.interpolate(roi_feats_hr_3, region_size, mode="bilinear")
+                    roi_feats_hr_3 = crop_and_resize(roi_feats_hr_3, multi_roi_center, region_size, scale=1/2)
+                    roi_feats_hr = torch.cat([roi_feats_hr_1, roi_feats_hr_2, roi_feats_hr_3], dim=1)
+
+                # TODO: test unet result
+                # import pdb
+                # pdb.set_trace()
+                # input_roi_tmpimg = input_roi[0, :, :, :]
+                # if len(input_roi_tmpimg.shape) > 2: input_roi_tmpimg = input_roi_tmpimg.permute(1, 2, 0)
+                # tmpimg = input_roi_tmpimg.detach().cpu().numpy()
+                #
+                # tmpimg -= np.min(tmpimg)
+                # tmpimg /= np.max(tmpimg)  # Normalize between 0-1
+                # tmpimg = np.uint8(tmpimg * 255.0)
+                # tmp_file = "tmp.png"
+                # cv2.imwrite(tmp_file, tmpimg)
+                # # tmp_c = roi_feats_hr.shape[0]
+                # # for i in range(tmp_c):
+                # # sample_roi_image = roi_feats_hr[0, :, :, :]
+                # # sample_roi_image = torch.mean(sample_roi_image, 0)
+                # # sample_roi_image = self.subpixel_up_by4(roi_feats_hr)
+                # sample_roi_image = roi_feats_hr[0, :, :, :]
+                # # sample_roi_image = torch.mean(sample_roi_image, 0)
+                # sample_roi_image = sample_roi_image[0, :, :]
+                # sample_roi_image = sample_roi_image.detach().cpu().numpy()
+                # sample_roi_image -= np.min(sample_roi_image)
+                # sample_roi_image /= np.max(sample_roi_image)  # Normalize between 0-1
+                # sample_roi_image = np.uint8(sample_roi_image * 255.0)
+                # tmp_file = "tmp_unet.png"
+                # cv2.imwrite(tmp_file, sample_roi_image)
+
+        # xiaofeng add for k=3 layer for ROI
+        if self.orig_stemnet:
+            roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
+        else:
+            # Note: this is to test the stemNet replacing performance
+            # for resnet only
+            # roi_feats_hr = self.subpixel_up_by4(roi_feats_hr)             # (batch, 16, 32, 32)
+            # TODO: for Resnet34_Unet
+            # roi_feats_hr = crop_and_resize(roi_feats_hr, roi_center, region_size, scale=1.0)
+            pass
+
+            # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
+        # crop_and_resize(image, center, output_size, scale=1)
+
+        # this is the original operation
+        # roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
+
+        # TODO: xiaofeng use 256 channel : 64x64 -> 256x256
+        # roi_feats_lr = crop_and_resize(input_ds_feats_orig, roi_center/ds_factor, region_size, scale=1./ds_factor)
+
+        # use 64 channel for saving memory
+        input_ds_feats = self.subpixel_up_by2(input_ds_feats_orig)  # 256 -> 64 channel
+        input_ds_feats = F.interpolate(input_ds_feats, region_size, mode="bilinear")
+        roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
+
+
+        # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
+        # fusion layer
+        if remove_hr_feature:
+            # discard ROI feature to verify refine stage performance, we don't concat the feature
+            roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))
+            # end of discard ROI feature
+        else:
+            # TODO -- add for 3 ROI hr feats with ds feats -- 256 x region_size x region_size
+            roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)  # (batch, 512/32, 256, 256)
+            roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
+
+            # TODO -- # the self-attention module
+            # import pdb
+            # pdb.set_trace()
+            # roi_feats = self.attention(roi_feats)
+            # end -- test self-attention
+
+        # 32 channel --> 1 channel  (batch, 1, 256, 256)
+        heatmap_roi_pred = self.heatmap_roi(roi_feats)
+
+        if infer_roi:
+            # Get initial location from heatmap
             if self.cfg.TRAIN.MV_IDEA:
-                if self.orig_stemnet:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))
-                else:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1_1(input_roi)))
-                roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
+                loc_pred_init = get_heatmap_center_preds(heatmap_roi_pred.cpu().numpy())[:, 0, :]
             else:
-                if self.orig_stemnet:
-                    roi_feats_hr = self.relu(self.bn1(self.conv1(input_roi)))     # strip = 2
-                    roi_feats_hr = self.relu(self.bn2(self.conv2(roi_feats_hr)))  # (batch, 64, 128, 128)
-                else:
-                    # roi_feats_hr = self.resnet(input_roi)    # (batch, 512, 8, 8)
-                    # don't apply Resnet34_Unet if remove_hr_feature
-                    if not remove_hr_feature:
-                        # TODO: apply HRnet here
-                        # roi_feats_hr = self.Resnet34_Unet(input_roi)  # (batch, 16/256, 128, 128)
-                        roi_feats_hr = self.hrnet_roi(input_roi)  # (batch, 256, 64, 64)
-                        roi_feats_hr = F.interpolate(roi_feats_hr, region_size, mode="bilinear") # (batch, 16/256, 256, 256)
+                loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
 
-                        #TODO: test unet result
-                        # import pdb
-                        # pdb.set_trace()
-                        # input_roi_tmpimg = input_roi[0, :, :, :]
-                        # if len(input_roi_tmpimg.shape) > 2: input_roi_tmpimg = input_roi_tmpimg.permute(1, 2, 0)
-                        # tmpimg = input_roi_tmpimg.detach().cpu().numpy()
-                        #
-                        # tmpimg -= np.min(tmpimg)
-                        # tmpimg /= np.max(tmpimg)  # Normalize between 0-1
-                        # tmpimg = np.uint8(tmpimg * 255.0)
-                        # tmp_file = "tmp.png"
-                        # cv2.imwrite(tmp_file, tmpimg)
-                        # # tmp_c = roi_feats_hr.shape[0]
-                        # # for i in range(tmp_c):
-                        # # sample_roi_image = roi_feats_hr[0, :, :, :]
-                        # # sample_roi_image = torch.mean(sample_roi_image, 0)
-                        # # sample_roi_image = self.subpixel_up_by4(roi_feats_hr)
-                        # sample_roi_image = roi_feats_hr[0, :, :, :]
-                        # # sample_roi_image = torch.mean(sample_roi_image, 0)
-                        # sample_roi_image = sample_roi_image[0, :, :]
-                        # sample_roi_image = sample_roi_image.detach().cpu().numpy()
-                        # sample_roi_image -= np.min(sample_roi_image)
-                        # sample_roi_image /= np.max(sample_roi_image)  # Normalize between 0-1
-                        # sample_roi_image = np.uint8(sample_roi_image * 255.0)
-                        # tmp_file = "tmp_unet.png"
-                        # cv2.imwrite(tmp_file, sample_roi_image)
+            loc_pred_init = torch.FloatTensor(loc_pred_init).cuda(non_blocking=True)
+            meta.update({'pixel_in_roi': loc_pred_init.cpu()})
+        else:
+            loc_pred_init = meta['pixel_in_roi'].cuda(non_blocking=True)
 
-            # xiaofeng add for k=3 layer for ROI
-            if self.cfg.TRAIN.MV_IDEA:
-                if not self.orig_stemnet:
-                    roi_feats_hr = self.relu(self.bn3(self.conv3(roi_feats_hr)))  # (batch, 64, 128, 128)
+        # roi_feats: (batch, 32, 256, 256) --> (batch, 32, 1, 1)
+        # loc_init_feat = crop_and_resize(roi_feats, loc_pred_init, output_size=1)
+        # (batch, 32, 1, 1) --> (batch, 32) / [B, 1792, 1, 1] --> [B, 1792]
+        # loc_init_feat = loc_init_feat[:, :, 0, 0]
 
-            if self.orig_stemnet:
-                roi_feats_hr = self.subpixel_up_by2(roi_feats_hr)             # (batch, 16, 256, 256)
-            else:
-                # Note: this is to test the stemNet replacing performance
-                # for resnet only
-                # roi_feats_hr = self.subpixel_up_by4(roi_feats_hr)             # (batch, 16, 32, 32)
-                # TODO: for Resnet34_Unet
-                # roi_feats_hr = crop_and_resize(roi_feats_hr, roi_center, region_size, scale=1.0)
-                pass
-
-                # 256 x (res/4) channel --> 16 x channel --> (batch, 16, 256, 256)
-            # crop_and_resize(image, center, output_size, scale=1)
-
-            # this is the original operation
-            # roi_feats_lr = crop_and_resize(input_ds_feats, roi_center/ds_factor, region_size, scale=1./ds_factor)
-
-            # TODO: xiaofeng use 256 channel : 64x64 -> 256x256
-            roi_feats_lr = crop_and_resize(input_ds_feats_orig, roi_center/ds_factor, region_size, scale=1./ds_factor)
-
-
-            # 16 + 16 channel --> (batch, 32, 256, 256) --> (336, 336)
-            # fusion layer
-            if remove_hr_feature:
-                # discard ROI feature to verify refine stage performance, we don't concat the feature
-                roi_feats = self.relu(self.bnf(self.convf_roi(roi_feats_lr)))
-                # end of discard ROI feature
-            else:
-                roi_feats = torch.cat([roi_feats_lr, roi_feats_hr], dim=1)  # (batch, 512/32, 256, 256)
-                roi_feats = self.relu(self.bnf(self.convf(roi_feats)))
-
-            # 32 channel --> 1 channel  (batch, 1, 256, 256)
-            heatmap_roi_pred = self.heatmap_roi(roi_feats)
-
-            if infer_roi:
-                # Get initial location from heatmap
-                if self.cfg.TRAIN.MV_IDEA:
-                    loc_pred_init = get_heatmap_center_preds(heatmap_roi_pred.cpu().numpy())[:, 0, :]
-                else:
-                    loc_pred_init = get_max_preds(heatmap_roi_pred.cpu().numpy())[0][:, 0, :]
-
-                loc_pred_init = torch.FloatTensor(loc_pred_init).cuda(non_blocking=True)
-                meta.update({'pixel_in_roi': loc_pred_init.cpu()})
-            else:
-                loc_pred_init = meta['pixel_in_roi'].cuda(non_blocking=True)
-
-            # roi_feats: (batch, 32, 256, 256) --> (batch, 32, 1, 1)
-            # loc_init_feat = crop_and_resize(roi_feats, loc_pred_init, output_size=1)
-            # (batch, 32, 1, 1) --> (batch, 32) / [B, 1792, 1, 1] --> [B, 1792]
-            # loc_init_feat = loc_init_feat[:, :, 0, 0]
-
-            # xiaofeng: disable regression network
-            offset_in_roi_pred = torch.from_numpy(np.tile(np.array([-1, -1], np.float32), (batch, 1))).cuda()
-            # if self.cfg.TRAIN.EFF_NET:
-            #     # (batch, 1792) --> (batch, 2)
-            #     offset_in_roi_pred = self.eff_regress(loc_init_feat)
-            # else:
-            #     # (batch, 32) --> (batch, 2)
-            #     offset_in_roi_pred = self.regress(loc_init_feat)
+        # xiaofeng: disable regression network
+        offset_in_roi_pred = torch.from_numpy(np.tile(np.array([-1, -1], np.float32), (batch, 1))).cuda()
+        # if self.cfg.TRAIN.EFF_NET:
+        #     # (batch, 1792) --> (batch, 2)
+        #     offset_in_roi_pred = self.eff_regress(loc_init_feat)
+        # else:
+        #     # (batch, 32) --> (batch, 2)
+        #     offset_in_roi_pred = self.regress(loc_init_feat)
 
         return heatmap_ds_pred, heatmap_roi_pred, offset_in_roi_pred, meta
 
